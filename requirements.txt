@@ -1,0 +1,11 @@
+opencv-python
+numpy
+matplotlib
+pandas
+scipy
+tqdm
+FPDF
+fastapi
+uvicorn
+python-multipart
+uvicorn[standard]

@@ -1,0 +1,49 @@
+# === Python ===
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# === FastAPI output ===
+*.log
+*.csv
+*.pdf
+*.png
+*.jpg
+results/
+uploads/
+output_frames_*/
+elongation_marked_*/
+
+# === Node/Nuxt ===
+# Nuxt dev/build outputs
+.output
+.data
+.nuxt
+.nitro
+.cache
+dist
+server.cert
+server.key
+
+# Node dependencies
+node_modules
+
+# Logs
+logs
+*.log
+
+# Misc
+.DS_Store
+.fleet
+.idea
+
+# Local env files
+.env
+.env.*
+!.env.example
+stats.html
+
+# === OS ===
+.DS_Store
+Thumbs.db
