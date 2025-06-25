@@ -59,9 +59,12 @@ def batch_run():
 
         if os.path.exists(csv_output):
             df = pd.read_csv(csv_output)
-            df_final, yield_time, yield_elongation = process_and_plot(df, final_csv, plot_path)
+            result = process_and_plot(df, final_csv, plot_path)
+            if result is None:
+                print(f"⚠️ Processing failed for {base_name}, skipping analysis.")
+                continue
+            df_final, yield_time, yield_elongation = result
             compute_force_curve(df_final, yield_strength, rebar_diameter, force_path)
-
 
             results.append({
                 "name": base_name,

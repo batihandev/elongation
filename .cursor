@@ -1,0 +1,71 @@
+# .cursor
+# Cursor navigation and context for Elongation-Rebar: Marker Detection & Drawing
+#
+# Focus: Improving marker detection, drawing, and selection logic for elongation analysis.
+#
+# Key Files & Functions:
+#
+# - elongation/mark_frames.py
+#   - detect_markers(gray, center_x, ...): Main function for detecting marker (band) positions in each frame.
+#   - process_images(...): Main pipeline for processing frames, drawing markers, and saving annotated images.
+#   - stable_marker_detection(...): Robust marker detection with jitter and stability checks.
+#   - Drawing logic: Uses OpenCV to draw yellow (reference) and blue (current) lines, overlays pixel/percent info.
+#
+# - elongation/extract_frames.py
+#   - extract_frames(...): Frame extraction and stability detection (focus, motion, ORB, etc.)
+#   - Not the main focus for marker logic, but provides input frames.
+#
+# - test_enhanced_detection.py
+#   - For testing detection methods, including marker detection (optional for debugging).
+#
+# Marker Detection Pipeline (Summary):
+#
+# 1. **Frame Extraction:**
+#    - Frames are extracted from video (see extract_frames.py)
+# 2. **Marker Detection:**
+#    - detect_markers(gray, center_x, ...):
+#      - Detects top and bottom marker bands (texture transitions) in the rebar region.
+#      - Uses vertical Sobel, gradient thresholding, and band thickness/spacing checks.
+#    - stable_marker_detection(...):
+#      - Runs detect_markers with jitter and checks for stability (low stddev in detected positions).
+# 3. **Drawing Markers:**
+#    - process_images(...):
+#      - Draws yellow lines for reference (initial) marker positions.
+#      - Draws blue lines for current detected marker positions.
+#      - Overlays pixel/percent info (e.g., '54px (100%)') using OpenCV putText.
+#      - Saves annotated images for review.
+# 4. **Selection/Validation:**
+#    - Only frames with valid, stable marker detection are used for elongation analysis.
+#    - Unstable or missing detections are skipped/logged.
+#
+# To improve detection:
+# - Focus on detect_markers and stable_marker_detection in elongation/mark_frames.py
+# - Adjust gradient threshold, band thickness, min_valid_distance, and stability checks
+# - Review drawing logic in process_images for clarity and accuracy
+#
+# Navigation:
+# - elongation/mark_frames.py: All marker detection, drawing, and selection logic
+# - test_enhanced_detection.py: For testing/debugging detection
+#
+# [ignore]
+venv/
+.env/
+__pycache__/
+build/
+dist/
+results/
+uploads/
+.venv/
+
+[include]
+elongation/mark_frames.py
+elongation/extract_frames.py
+test_enhanced_detection.py
+process_video.py
+PROJECT_REVIEW.md
+HEAVY_PROCESSING_PARAMETERS.md
+requirements.txt
+Makefile
+.gitignore
+
+# You can add more configuration options as needed. 

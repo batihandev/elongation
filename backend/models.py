@@ -4,6 +4,12 @@ from pydantic import BaseModel
 class ElongationOptions(BaseModel):
     skip_start: Optional[int] = 0
     skip_end: Optional[int] = 0
+    skip_start_seconds: Optional[float] = 0.0
+    auto_detect_focus: Optional[bool] = True
+    auto_detect_motion: Optional[bool] = True
+    focus_threshold: Optional[float] = 50.0
+    motion_threshold: Optional[float] = 1000.0
+    min_consecutive_stable: Optional[int] = 15
     yield_strength: Optional[float] = 420   # MPa
     rebar_diameter: Optional[int] = 16      # mm
     font_scale: Optional[float] = 0.6

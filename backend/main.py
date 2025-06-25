@@ -55,6 +55,12 @@ async def process_video(
     max_elong: float = Form(140),
     skip_start: int = Form(0),
     skip_end: int = Form(0),
+    skip_start_seconds: float = Form(0.0),
+    auto_detect_focus: bool = Form(True),
+    auto_detect_motion: bool = Form(True),
+    focus_threshold: float = Form(50.0),
+    motion_threshold: float = Form(200.0),
+    min_consecutive_stable: int = Form(10),
     font_scale: float = Form(0.6),
     pattern_width: int = Form(8),
     max_pattern_height: int = Form(12),
@@ -72,7 +78,7 @@ async def process_video(
 ):
     loop = asyncio.get_running_loop()
     callback = make_progress_callback(loop)
-    safe_base_name = normalize_video_name(video.filename)  # Normalize video name
+    safe_base_name = normalize_video_name(video.filename or "unknown_video")  # Normalize video name
     video_path = f"uploads/{video.filename}"
     os.makedirs("uploads", exist_ok=True)
     with open(video_path, "wb") as buffer:
@@ -87,12 +93,30 @@ async def process_video(
         if processing_cancelled.is_set():
             raise RuntimeError("Processing cancelled before start.")
         processing_cancelled.clear()
-        extract_frames(video_path, frames_dir, every_n_frames=every_n_frames, progress_callback=callback,cancel_event=processing_cancelled)
+        
+        # Extract frames with focus detection and flexible skipping
+        extraction_result = extract_frames(
+            video_path, 
+            frames_dir, 
+            every_n_frames=every_n_frames, 
+            skip_start_frames=skip_start,
+            skip_start_seconds=skip_start_seconds,
+            auto_detect_focus=auto_detect_focus,
+            auto_detect_motion=auto_detect_motion,
+            focus_threshold=int(focus_threshold),
+            motion_threshold=int(motion_threshold),
+            edge_threshold=30,  # Match test parameters
+            bg_threshold=20,    # Match test parameters
+            min_consecutive_stable=min_consecutive_stable,
+            progress_callback=callback,
+            cancel_event=processing_cancelled
+        )
+        
         process_images(
             input_folder=frames_dir,
             output_folder=marked_dir,
             csv_output_path=csv_path,
-            skip_start_frames=skip_start,
+            skip_start_frames=0,  # Already handled in extract_frames
             skip_end_frames=skip_end,
             font_scale=font_scale,
             pattern_width=pattern_width,
@@ -113,18 +137,22 @@ async def process_video(
         if not os.path.exists(csv_path):
             raise RuntimeError("No data generated — check marker detection.")
         df = pd.read_csv(csv_path)
-        result_df, yield_time, yield_elongation = process_and_plot(
+        result = process_and_plot(
             df,
             output_csv=final_csv_path,
             plot_path=plot_path,
-            min_elongation=min_elong,
-            max_elongation=max_elong,
+            min_elongation=int(min_elong),
+            max_elongation=int(max_elong),
             progress_callback=callback,
             cancel_event=processing_cancelled
         )
-        return csv_path, final_csv_path, plot_path, yield_time, yield_elongation
+        if result is None:
+            result_df, yield_time, yield_elongation = None, None, None
+        else:
+            result_df, yield_time, yield_elongation = result
+        return csv_path, final_csv_path, plot_path, yield_time, yield_elongation, extraction_result
 
-    csv_path, final_csv_path, plot_path, yield_time, yield_elongation = await loop.run_in_executor(executor, blocking_processing)
+    csv_path, final_csv_path, plot_path, yield_time, yield_elongation, extraction_result = await loop.run_in_executor(executor, blocking_processing)
 
     return {
         "status": "Processed",
@@ -132,7 +160,13 @@ async def process_video(
         "final_data": final_csv_path,
         "plot": plot_path,
         "yield_time_s": yield_time,
-        "yield_elongation_percent": yield_elongation
+        "yield_elongation_percent": yield_elongation,
+        "extraction_info": {
+            "frames_saved": extraction_result.get('frames_saved', 0),
+            "frames_skipped": extraction_result.get('frames_skipped', 0),
+            "time_skipped": extraction_result.get('time_skipped', 0.0),
+            "focus_detected": extraction_result.get('focus_info') is not None
+        }
     }
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

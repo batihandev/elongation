@@ -77,14 +77,16 @@ def plot_percent_with_mm_axis(data_csv_path, pixel_to_mm_csv_path, output_plot_p
     ax1.set_ylabel("Elongation (mm)")
 
 
-    if "strain_rate" in df.columns and not df["strain_rate"].isna().all():
+    if "strain_rate" in df.columns and len(df["strain_rate"].dropna()) > 0:
         yield_index = df["strain_rate"].idxmax()
-        if not pd.isna(yield_index):
+        try:
             yield_time = df.loc[yield_index, "timestamp_s"]
             yield_percent = df.loc[yield_index, "elongation_smoothed_corrected"]
             yield_mm = (yield_percent - 100.0) * mm_per_percent
             ax1.axvline(yield_time, color='red', linestyle='--', label='Yield Point')
             ax1.scatter([yield_time], [yield_percent], color='red')
+        except (KeyError, ValueError):
+            pass  # Skip if yield_index is invalid
 
     plt.tight_layout()
     plt.savefig(output_plot_path)
