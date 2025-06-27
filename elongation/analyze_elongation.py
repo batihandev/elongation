@@ -20,8 +20,13 @@ def process_and_plot(
     min_elongation=100,
     max_elongation=140,
     progress_callback=None,
-    cancel_event=None
+    cancel_event=None,
+    zoomed_plot_path=None
 ):
+    # Always save the zoomed plot by default
+    if zoomed_plot_path is None and plot_path.endswith('.png'):
+        zoomed_plot_path = plot_path.replace('.png', '_zoomed.png')
+
     def notify_progress(p, msg):
         if progress_callback:
             progress_callback(p, msg)
@@ -31,6 +36,7 @@ def process_and_plot(
     notify_progress(0.85, f"🔎 Raw input shape: {df.shape}")
 
     df = df.loc[(df["elongation_percent"] >= min_elongation) & (df["elongation_percent"] <= max_elongation)].copy()
+    df = df.reset_index(drop=True)
     notify_progress(0.90, f"✅ After valid elongation range filter ({min_elongation}–{max_elongation}%): {df.shape}")
 
     if df.empty:
@@ -99,21 +105,32 @@ def process_and_plot(
     plt.legend()
     plt.tight_layout()
 
+    # Add number of frames annotation to main plot
+    plt.text(0.99, 0.01, f"Frames used: {len(df)}", ha='right', va='bottom',
+             transform=plt.gca().transAxes, fontsize=10, color='gray')
+
     plt.savefig(plot_path)
     df.to_csv(output_csv, index=False)
 
     # --- Auto-zoomed plot ---
-    interesting_min = min(df["elongation_monotonic"].min(), df["elongation_smoothed"].min())
-    interesting_max = max(df["elongation_monotonic"].max(), df["elongation_smoothed"].max())
-    margin = 0.5
-    zoom_min = max(interesting_min - margin, 0)
-    zoom_max = interesting_max + margin
-    # Enforce minimum zoom range of 2%
-    if zoom_max - zoom_min < 2:
-        zoom_max = zoom_min + 2
-    plt.ylim(zoom_min, zoom_max)
-    plt.yticks(np.arange(np.floor(zoom_min), np.ceil(zoom_max)+0.1, 0.5))
-    plt.savefig(plot_path.replace('.png', '-zoomed.png'))
+    # Use percentiles to ignore outliers for zoomed plot
+    all_vals = pd.concat([df["elongation_monotonic"], df["elongation_smoothed"]]).dropna()
+    if len(all_vals) > 0:
+        q_low, q_high = np.percentile(all_vals, [1, 99])
+        margin = 0.5
+        zoom_min = max(q_low - margin, 0)
+        zoom_max = q_high + margin
+        if zoom_max - zoom_min < 2:
+            zoom_max = zoom_min + 2
+        # Only apply clipping to the zoomed plot
+        plt.ylim(zoom_min, zoom_max)
+        plt.yticks(np.arange(np.floor(zoom_min), np.ceil(zoom_max)+0.1, 0.5))
+        # Add number of frames annotation to zoomed plot
+        plt.text(0.99, 0.01, f"Frames used: {len(df)}", ha='right', va='bottom',
+                 transform=plt.gca().transAxes, fontsize=10, color='gray')
+        if zoomed_plot_path is not None:
+            plt.savefig(zoomed_plot_path)
+    plt.close()
 
     notify_progress(1.0, f"📊 Saved cleaned data to: {output_csv}, plot to: {plot_path}")
     return df, yield_time, yield_elongation

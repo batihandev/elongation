@@ -5,6 +5,8 @@ from elongation.extract_frames import extract_frames
 from elongation.mark_frames import process_images
 from elongation.analyze_elongation import process_and_plot
 import pandas as pd
+import subprocess
+import shutil
 
 def process_video(
     video_path, 
@@ -30,6 +32,14 @@ def process_video(
     csv_path = f"results/elongation_data_{base_name}.csv"
     final_csv_path = f"results/elongation_final_{base_name}.csv"
     plot_path = f"results/elongation_plot_{base_name}.png"
+    
+    # Clean up previous outputs if they exist
+    for path in [frames_dir, marked_dir]:
+        if os.path.exists(path):
+            shutil.rmtree(path)
+    for path in [csv_path, final_csv_path, plot_path, plot_path.replace('.png', '_zoomed.png')]:
+        if os.path.exists(path):
+            os.remove(path)
     
     print(f"🎬 Processing: {video_path}")
     print(f"📁 Output: {base_name}")
@@ -82,6 +92,10 @@ def process_video(
             print(f"✅ Done! Yield time: {yield_time:.2f}s, Yield elongation: {yield_elongation:.2f}%")
             print(f"📈 Plot saved: {plot_path}")
             print(f"📊 Data saved: {final_csv_path}")
+            # Open zoomed plot image for quick viewing
+            zoomed_plot_path = plot_path.replace('.png', '_zoomed.png')
+            if os.path.exists(zoomed_plot_path):
+                subprocess.Popen(['feh', zoomed_plot_path])
         else:
             print("❌ Analysis failed")
     else:

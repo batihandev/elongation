@@ -17,7 +17,7 @@ def process_images(
     color_curr=(255, 100, 100), # Blue
     color_grid=(200, 200, 200),
     color_middle=(0, 0, 255),   # Red
-    max_pattern_height=20,
+    max_pattern_height=15,
     pattern_width=10,
     search_margin_y=3,
     search_margin_x=3,
@@ -31,8 +31,8 @@ def process_images(
     max_band_thickness=10,
     progress_callback=None,
     cancel_event=None,
-    pattern_top_grid=9,
-    pattern_bottom_grid=1
+    pattern_top_grid=6,
+    pattern_bottom_grid=2
 ):
     """
     pattern_top_grid: int (default 10) - grid line (0=bottom, 10=top) for top pattern extraction
@@ -135,11 +135,11 @@ def process_images(
 
     def draw_reference_grid(img, ref_top, ref_bottom, ref_distance):
         h, w = img.shape[:2]
-        # Draw 10 white grid lines evenly spaced across the entire image height
-        for i in range(11):
-            y = int(i * h / 10)
+        # Draw 10 white grid lines evenly spaced across the entire image height (0=bottom, 9=near top)
+        for i in range(10):  # Only 0-9, do not draw the 10th (topmost) line
+            y = int((9 - i) * h / 9)  # 0 at bottom, 9 near top
             cv2.line(img, (0, y), (w, y), color_grid, 1)
-            # Draw grid numbers (0=bottom, 10=top) at left margin
+            # Draw grid numbers (0=bottom, 9=near top) at left margin
             cv2.putText(img, str(i), (5, y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
 
     def score_candidate_pair(pt, pb, frames, precomputed):
@@ -156,16 +156,15 @@ def process_images(
             x2 = min(center_x + pattern_width // 2 + search_margin_x, gray.shape[1])
             strip = gray[:, x1:x2]
 
-            # Focus search on middle section: 30% to 70% of rebar height
             h = gray.shape[0]
-            mid_start = int(h * 0.3)  # 30% from top
-            mid_end = int(h * 0.7)    # 70% from top
-            mid_center = (mid_start + mid_end) // 2
-            
-            # Search for top pattern in upper middle section (30% to 50%)
-            top_y, score_top = match_pattern(strip, pt, (mid_start, mid_center))
-            # Search for bottom pattern in lower middle section (50% to 70%)
-            bottom_y, score_bottom = match_pattern(strip, pb, (mid_center, mid_end))
+            # Use grid system: 0=bottom, 10=top
+            y_top_center = int((10 - pattern_top_grid) * h / 10)
+            y_bottom_center = int((10 - pattern_bottom_grid) * h / 10)
+            search_margin = 20  # or use pattern_search_margin if you want it configurable
+            # Search for top pattern near y_top_center
+            top_y, score_top = match_pattern(strip, pt, (max(0, y_top_center - search_margin), min(h, y_top_center + search_margin)))
+            # Search for bottom pattern near y_bottom_center
+            bottom_y, score_bottom = match_pattern(strip, pb, (max(0, y_bottom_center - search_margin), min(h, y_bottom_center + search_margin)))
 
             if top_y is not None and bottom_y is not None and score_top is not None and score_bottom is not None:
                 score = score_top + score_bottom
@@ -248,21 +247,14 @@ def process_images(
         frame = frames[idx]
         img, gray = precomputed[frame]
         center_x = detect_rebar_center_x(gray)
-        # For the first frame, set ref_top and ref_bottom using detected markers
-        if ref_top is None or ref_bottom is None:
-            detected_top, detected_bottom = detect_markers(gray, center_x,scan_width, threshold_ratio, min_valid_distance, max_band_thickness)
-            if detected_top is not None and detected_bottom is not None:
-                ref_top, ref_bottom = detected_top, detected_bottom
-                ref_distance = ref_bottom - ref_top
-        # Only proceed if reference is set and ref_distance is valid
-        if ref_top is not None and ref_bottom is not None and ref_distance is not None:
-            # New grid system: 0=bottom, 10=top
-            y_top = int(ref_bottom + (ref_top - ref_bottom) * (pattern_top_grid / 10))
-            y_bottom = int(ref_bottom + (ref_top - ref_bottom) * (pattern_bottom_grid / 10))
-            if idx == 0:
-                print(f"[DEBUG] First frame pattern extraction: y_top={y_top}, y_bottom={y_bottom}, ref_top={ref_top}, ref_bottom={ref_bottom}, ref_distance={ref_distance}")
-            extract_pattern_candidates(gray, center_x, y_top, y_bottom, pattern_candidates_top, pattern_candidates_bottom)
-            pattern_capture.append((gray, center_x, y_top, y_bottom))
+        h = gray.shape[0]
+        # Use grid system: 0=bottom, 10=top
+        y_top = int((10 - pattern_top_grid) * h / 10)
+        y_bottom = int((10 - pattern_bottom_grid) * h / 10)
+        if idx == 0:
+            print(f"[DEBUG] First frame pattern extraction: y_top={y_top}, y_bottom={y_bottom}, image height={h}")
+        extract_pattern_candidates(gray, center_x, y_top, y_bottom, pattern_candidates_top, pattern_candidates_bottom)
+        pattern_capture.append((gray, center_x, y_top, y_bottom))
     if cancel_event and cancel_event.is_set():
         notify_progress(1.0, "Processing cancelled by user.")
         return
