@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from elongation.subpixel import subpixel_refine
 
 def detect_markers(gray, center_x, scan_width=10, threshold_ratio=0.3, min_valid_distance=50, max_band_thickness=10):
     h, w = gray.shape
@@ -18,7 +19,10 @@ def detect_markers(gray, center_x, scan_width=10, threshold_ratio=0.3, min_valid
                 for dy in range(1, max_band_thickness):
                     next_y = y + dy * step
                     if 0 <= next_y < h and gradient_strength[next_y] > threshold:
-                        return (y + next_y) // 2
+                        # Subpixel refinement for the band position
+                        band_y = (y + next_y) // 2
+                        band_y_subpixel = subpixel_refine(gradient_strength, band_y, mode='array')
+                        return band_y_subpixel
         return None
 
     # Focus on middle section: 30% to 70% of rebar height

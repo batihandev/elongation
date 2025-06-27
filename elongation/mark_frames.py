@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from elongation.detect_markers import detect_markers
 from tqdm import tqdm
+from elongation.subpixel import subpixel_refine
 
 def process_images(
     input_folder,
@@ -17,12 +18,12 @@ def process_images(
     color_curr=(255, 100, 100), # Blue
     color_grid=(200, 200, 200),
     color_middle=(0, 0, 255),   # Red
-    max_pattern_height=15,
-    pattern_width=10,
-    search_margin_y=3,
-    search_margin_x=3,
-    pattern_capture_frames=15,
-    pattern_capture_step=10,
+    max_pattern_height=20,
+    pattern_width=15,
+    search_margin_y=1, # affect initial collection of pattern candidates not the final matching
+    search_margin_x=1, # affect initial collection of pattern candidates not the final matching
+    pattern_capture_frames=5,
+    pattern_capture_step=15,
     prune_threshold=1e7,
     top_n_to_keep=5,
     scan_width=10,
@@ -31,8 +32,8 @@ def process_images(
     max_band_thickness=10,
     progress_callback=None,
     cancel_event=None,
-    pattern_top_grid=6,
-    pattern_bottom_grid=2
+    pattern_top_grid=7,
+    pattern_bottom_grid=3
 ):
     """
     pattern_top_grid: int (default 10) - grid line (0=bottom, 10=top) for top pattern extraction
@@ -115,23 +116,49 @@ def process_images(
                 pattern = strip[by - max_pattern_height:by, :].copy()
                 pattern_candidates_bottom.append(pattern)
 
+    def normalize_and_denoise(img):
+        # Apply Gaussian blur for denoising
+        img_blur = cv2.GaussianBlur(img, (3, 3), 0)
+        # Normalize to zero mean, unit variance
+        img_norm = img_blur.astype(float)
+        img_norm = (img_norm - np.mean(img_norm)) / (np.std(img_norm) + 1e-8)
+        return img_norm
+
     def match_pattern(strip, pattern, search_range):
         best_score = float('inf')
         best_y = None
-
+        scores = {}
+        pattern_proc = normalize_and_denoise(pattern)
         for y in range(search_range[0], search_range[1] - pattern.shape[0]):
-            candidate = strip[y:y + pattern.shape[0], :]
+            iy = int(round(y))
+            candidate = strip[iy:iy + pattern.shape[0], :]
             if candidate.shape != pattern.shape:
                 continue
-
-            score = np.linalg.norm(candidate.astype(float) - pattern.astype(float))
+            candidate_proc = normalize_and_denoise(candidate)
+            score = np.linalg.norm(candidate_proc - pattern_proc)
+            scores[y] = score
             if score < best_score:
                 best_score = score
                 best_y = y
-
         if best_y is None:
             return None, None
-        return best_y, best_score
+        # Subpixel refinement
+        def score_func(y_):
+            iy_ = int(round(y_))
+            if iy_ in scores:
+                return scores[iy_]
+            if iy_ < search_range[0] or iy_ > search_range[1] - pattern.shape[0]:
+                return float('inf')
+            candidate = strip[iy_:iy_ + pattern.shape[0], :]
+            if candidate.shape != pattern.shape:
+                return float('inf')
+            candidate_proc = normalize_and_denoise(candidate)
+            return np.linalg.norm(candidate_proc - pattern_proc)
+        if best_y > search_range[0] and best_y < search_range[1] - pattern.shape[0] - 1:
+            best_y_subpixel = subpixel_refine(score_func, best_y, mode='callable')
+        else:
+            best_y_subpixel = float(best_y)
+        return best_y_subpixel, best_score
 
     def draw_reference_grid(img, ref_top, ref_bottom, ref_distance):
         h, w = img.shape[:2]
@@ -178,35 +205,56 @@ def process_images(
         return total_score if valid_matches > 0 else float('inf'), temp_results
 
     def find_pattern_near_reference(strip, pattern, reference_y, max_search_distance=20):
-        """Find pattern near a reference position by searching outward systematically"""
         h = strip.shape[0]
         best_score = float('inf')
         best_y = None
-        
-        # Search outward from reference position: +1, -1, +2, -2, +3, -3, etc.
+        scores = {}
+        pattern_proc = normalize_and_denoise(pattern)
         for distance in range(max_search_distance + 1):
             # Try positive offset
             test_y = reference_y + distance
             if test_y >= 0 and test_y + pattern.shape[0] <= h:
-                candidate = strip[test_y:test_y + pattern.shape[0], :]
+                iy = int(round(test_y))
+                candidate = strip[iy:iy + pattern.shape[0], :]
                 if candidate.shape == pattern.shape:
-                    score = np.linalg.norm(candidate.astype(float) - pattern.astype(float))
+                    candidate_proc = normalize_and_denoise(candidate)
+                    score = np.linalg.norm(candidate_proc - pattern_proc)
+                    scores[test_y] = score
                     if score < best_score:
                         best_score = score
                         best_y = test_y
-            
             # Try negative offset (skip distance=0 to avoid duplicate)
             if distance > 0:
                 test_y = reference_y - distance
                 if test_y >= 0 and test_y + pattern.shape[0] <= h:
-                    candidate = strip[test_y:test_y + pattern.shape[0], :]
+                    iy = int(round(test_y))
+                    candidate = strip[iy:iy + pattern.shape[0], :]
                     if candidate.shape == pattern.shape:
-                        score = np.linalg.norm(candidate.astype(float) - pattern.astype(float))
+                        candidate_proc = normalize_and_denoise(candidate)
+                        score = np.linalg.norm(candidate_proc - pattern_proc)
+                        scores[test_y] = score
                         if score < best_score:
                             best_score = score
                             best_y = test_y
-        
-        return best_y, best_score if best_y is not None else None
+        if best_y is None:
+            return None, None
+        # Subpixel refinement
+        def score_func(y_):
+            iy_ = int(round(y_))
+            if iy_ in scores:
+                return scores[iy_]
+            if iy_ < 0 or iy_ + pattern.shape[0] > h:
+                return float('inf')
+            candidate = strip[iy_:iy_ + pattern.shape[0], :]
+            if candidate.shape != pattern.shape:
+                return float('inf')
+            candidate_proc = normalize_and_denoise(candidate)
+            return np.linalg.norm(candidate_proc - pattern_proc)
+        if best_y > 0 and best_y < h - pattern.shape[0] - 1:
+            best_y_subpixel = subpixel_refine(score_func, best_y, mode='callable')
+        else:
+            best_y_subpixel = float(best_y)
+        return best_y_subpixel, best_score
 
     if cancel_event and cancel_event.is_set():
         notify_progress(1.0, "Processing cancelled by user.")
@@ -353,30 +401,30 @@ def process_images(
         cv2.line(img, (center_x, 0), (center_x, img.shape[0]), color_middle, 1)
         
         # Draw reference grid and yellow lines at the fixed reference positions
-        draw_reference_grid(img, ref_top_fixed, ref_bottom_fixed, ref_gauge_length)
-        cv2.line(img, (0, ref_top_fixed), (img.shape[1], ref_top_fixed), color_ref, 2)
-        cv2.line(img, (0, ref_bottom_fixed), (img.shape[1], ref_bottom_fixed), color_ref, 2)
-        cv2.putText(img, f"{ref_gauge_length}px (100%)", (10, ref_top_fixed - 10), font, font_scale, color_ref, 2)
+        draw_reference_grid(img, int(round(ref_top_fixed)), int(round(ref_bottom_fixed)), ref_gauge_length)
+        cv2.line(img, (0, int(round(ref_top_fixed))), (img.shape[1], int(round(ref_top_fixed))), color_ref, 2)
+        cv2.line(img, (0, int(round(ref_bottom_fixed))), (img.shape[1], int(round(ref_bottom_fixed))), color_ref, 2)
+        cv2.putText(img, f"{ref_gauge_length}px (100%)", (10, int(round(ref_top_fixed)) - 10), font, font_scale, color_ref, 2)
 
         # Draw blue lines at the newly found optimal positions
-        cv2.line(img, (0, top_y), (img.shape[1], top_y), color_curr, 2)
-        cv2.line(img, (0, bottom_y), (img.shape[1], bottom_y), color_curr, 2)
-        cv2.putText(img, f"{bottom_y - top_y}px ({elongation_percent:.1f}%)", (img.shape[1] - 250, top_y - 10), font, font_scale, color_curr, 2)
+        cv2.line(img, (0, int(round(top_y))), (img.shape[1], int(round(top_y))), color_curr, 2)
+        cv2.line(img, (0, int(round(bottom_y))), (img.shape[1], int(round(bottom_y))), color_curr, 2)
+        cv2.putText(img, f"{bottom_y - top_y}px ({elongation_percent:.1f}%)", (img.shape[1] - 250, int(round(top_y)) - 10), font, font_scale, color_curr, 2)
 
         # Draw 50% transparent pattern overlays matching the pattern's actual size
         # Green overlay for yellow line patterns (reference)
         green_overlay = img.copy()
         cv2.rectangle(
             green_overlay,
-            (center_x - pattern_width // 2, ref_top_fixed),
-            (center_x + pattern_width // 2, ref_top_fixed + max_pattern_height),
+            (center_x - pattern_width // 2, int(round(ref_top_fixed))),
+            (center_x + pattern_width // 2, int(round(ref_top_fixed)) + max_pattern_height),
             (0, 255, 0),
             -1
         )
         cv2.rectangle(
             green_overlay,
-            (center_x - pattern_width // 2, ref_bottom_fixed - max_pattern_height),
-            (center_x + pattern_width // 2, ref_bottom_fixed),
+            (center_x - pattern_width // 2, int(round(ref_bottom_fixed)) - max_pattern_height),
+            (center_x + pattern_width // 2, int(round(ref_bottom_fixed))),
             (0, 255, 0),
             -1
         )
@@ -386,15 +434,15 @@ def process_images(
         purple_overlay = img.copy()
         cv2.rectangle(
             purple_overlay,
-            (center_x - pattern_width // 2, top_y),
-            (center_x + pattern_width // 2, top_y + max_pattern_height),
+            (center_x - pattern_width // 2, int(round(top_y))),
+            (center_x + pattern_width // 2, int(round(top_y)) + max_pattern_height),
             (255, 0, 255),
             -1
         )
         cv2.rectangle(
             purple_overlay,
-            (center_x - pattern_width // 2, bottom_y - max_pattern_height),
-            (center_x + pattern_width // 2, bottom_y),
+            (center_x - pattern_width // 2, int(round(bottom_y)) - max_pattern_height),
+            (center_x + pattern_width // 2, int(round(bottom_y))),
             (255, 0, 255),
             -1
         )
