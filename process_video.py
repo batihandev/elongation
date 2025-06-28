@@ -37,7 +37,7 @@ def process_video(
     for path in [frames_dir, marked_dir]:
         if os.path.exists(path):
             shutil.rmtree(path)
-    for path in [csv_path, final_csv_path, plot_path, plot_path.replace('.png', '_zoomed.png')]:
+    for path in [csv_path, final_csv_path, plot_path]:
         if os.path.exists(path):
             os.remove(path)
     
@@ -92,10 +92,9 @@ def process_video(
             print(f"✅ Done! Yield time: {yield_time:.2f}s, Yield elongation: {yield_elongation:.2f}%")
             print(f"📈 Plot saved: {plot_path}")
             print(f"📊 Data saved: {final_csv_path}")
-            # Open zoomed plot image for quick viewing
-            zoomed_plot_path = plot_path.replace('.png', '_zoomed.png')
-            if os.path.exists(zoomed_plot_path):
-                subprocess.Popen(['feh', zoomed_plot_path])
+            # Open plot image for quick viewing
+            if os.path.exists(plot_path):
+                subprocess.Popen(['feh', plot_path])
         else:
             print("❌ Analysis failed")
     else:

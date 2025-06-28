@@ -62,19 +62,13 @@ async def process_video(
     motion_threshold: float = Form(200.0),
     min_consecutive_stable: int = Form(10),
     font_scale: float = Form(0.6),
-    pattern_width: int = Form(8),
-    max_pattern_height: int = Form(12),
-    search_margin_y: int = Form(5),
-    search_margin_x: int = Form(5),
-    pattern_capture_frames: int = Form(10),
-    pattern_capture_step: int = Form(5),
-    prune_threshold: float = Form(1e7),
-    top_n_to_keep: int = Form(5),
-    scan_width: int = Form(10),
-    threshold_ratio: float = Form(0.3),
-    min_valid_distance: int = Form(50),
-    max_band_thickness: int = Form(10)
-
+    pattern_width: int = Form(15),
+    pattern_height: int = Form(15),
+    pattern_top_grid: int = Form(7),
+    pattern_bottom_grid: int = Form(3),
+    num_divisions: int = Form(75),
+    min_gap: int = Form(25),
+    dbscan_eps: float = Form(1.0)
 ):
     loop = asyncio.get_running_loop()
     callback = make_progress_callback(loop)
@@ -120,17 +114,12 @@ async def process_video(
             skip_end_frames=skip_end,
             font_scale=font_scale,
             pattern_width=pattern_width,
-            max_pattern_height=max_pattern_height,
-            search_margin_y=search_margin_y,
-            search_margin_x=search_margin_x,
-            pattern_capture_frames=pattern_capture_frames,
-            pattern_capture_step=pattern_capture_step,
-            prune_threshold=prune_threshold,
-            top_n_to_keep=top_n_to_keep,
-            scan_width=scan_width,
-            threshold_ratio=threshold_ratio,
-            min_valid_distance=min_valid_distance,
-            max_band_thickness=max_band_thickness,
+            pattern_height=pattern_height,
+            pattern_top_grid=pattern_top_grid,
+            pattern_bottom_grid=pattern_bottom_grid,
+            num_divisions=num_divisions,
+            min_gap=min_gap,
+            dbscan_eps=float(dbscan_eps),
             progress_callback=callback,
             cancel_event=processing_cancelled
         )

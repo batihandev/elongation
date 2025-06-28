@@ -1,0 +1,51 @@
+---
+description: 
+globs: *.vue
+alwaysApply: false
+---
+# main-rules.mdc
+
+## Framework & Styling
+
+- Use **Nuxt 3** with **TypeScript**.
+- Use **Tailwind CSS** for all styling.
+- Prefer **Nuxt UI** components (`@nuxthq/ui`) where possible.
+- Follow **accessibility best practices** (semantic tags, labels, ARIA when needed).
+
+## UI Principles
+
+- Keep UI **interactive and responsive** — use `@click`, `v-model`, `v-if`, `v-show`, `transition`, etc.
+- Use **Nuxt transitions** for route and component changes.
+- Use **grid** and **flex** layout via Tailwind utilities for layout composition.
+- All UI should be **mobile-first**, then scale to desktop.
+
+## Component Structure
+
+- Create small, **composable components**.
+- Use `defineProps`, `defineEmits`, and `defineSlots` properly.
+- Separate logic into **composables** under `~/composables`.
+
+## File Structure
+
+- Pages go in `pages/`, components in `components/`, reusable logic in `composables/`.
+- Use **PascalCase** for component names, **kebab-case** for filenames.
+
+## State & Data
+
+- Use **useState()** for local state (or **pinia** if globally needed).
+- Fetch data using `useAsyncData()` or `useFetch()`, respect SSR.
+- Always handle **loading and error** states.
+
+## Developer Experience
+
+- Write clean, readable, and documented code.
+- Prefer `<script setup>` syntax in components.
+- Auto-imports from `~/composables`, `~/utils`, etc. should be leveraged.
+- Keep components **stateless** when possible, use props + emits.
+
+## Cursor-Specific
+
+- Use clear instructions in comments when expecting code generation.
+- Add example JSON or config if you want Cursor to autogenerate UI.
+- Mark tool/component boundaries with headings or comments (e.g., `<!-- TOOL: SelectBox -->`).
+

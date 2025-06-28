@@ -119,26 +119,6 @@ def process_and_plot(
     plt.savefig(plot_path)
     df.to_csv(output_csv, index=False)
 
-    # --- Auto-zoomed plot ---
-    # Use percentiles to ignore outliers for zoomed plot
-    all_vals = pd.concat([df["elongation_monotonic"], df["elongation_smoothed"]]).dropna()
-    if len(all_vals) > 0:
-        q_low, q_high = np.percentile(all_vals, [1, 99])
-        margin = 0.5
-        zoom_min = max(q_low - margin, 0)
-        zoom_max = q_high + margin
-        if zoom_max - zoom_min < 2:
-            zoom_max = zoom_min + 2
-        # Only apply clipping to the zoomed plot
-        plt.ylim(zoom_min, zoom_max)
-        plt.yticks(np.arange(np.floor(zoom_min), np.ceil(zoom_max)+0.1, 0.5))
-        # Add number of frames annotation to zoomed plot
-        plt.text(0.99, 0.01, f"Frames used: {len(df)}", ha='right', va='bottom',
-                 transform=plt.gca().transAxes, fontsize=10, color='gray')
-        if zoomed_plot_path is not None:
-            plt.savefig(zoomed_plot_path)
-    plt.close()
-
     notify_progress(1.0, f"📊 Saved cleaned data to: {output_csv}, plot to: {plot_path}")
     return df, yield_time, yield_elongation
 

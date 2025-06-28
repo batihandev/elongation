@@ -52,43 +52,44 @@ def plot_percent_with_mm_axis(data_csv_path, pixel_to_mm_csv_path, output_plot_p
     df["elongation_mm"] = (df["elongation_percent"] - 100.0) * mm_per_percent
     df["elongation_median_mm"] = (df["elongation_median"] - 100.0) * mm_per_percent
     df["elongation_smoothed_mm"] = (df["elongation_smoothed"] - 100.0) * mm_per_percent
-    df["elongation_smoothed_corrected_mm"] = (df["elongation_smoothed_corrected"] - 100.0) * mm_per_percent
+    df["elongation_monotonic_mm"] = (df["elongation_monotonic"] - 100.0) * mm_per_percent
 
     # Save extended version
     df.to_csv(data_csv_path, index=False)
 
     fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax1.plot(df["timestamp_s"], df["elongation_percent"], label="Raw", linestyle="--", alpha=0.3)
-    ax1.plot(df["timestamp_s"], df["elongation_median"], label="Median Filtered", linestyle="--", color="orange", linewidth=1)
-    ax1.plot(df["timestamp_s"], df["elongation_smoothed"], label="Initial Smoothed", color="blue", linewidth=1, alpha=0.6)
-    ax1.plot(df["timestamp_s"], df["elongation_smoothed_corrected"], label="Final Adjusted", color="green", linewidth=2)
+    ax1.plot(df["timestamp_s"], df["elongation_percent"], label="Raw %", linestyle="--", alpha=0.3)
+    ax1.plot(df["timestamp_s"], df["elongation_median"], label="Median Filtered %", linestyle="--", color="orange", linewidth=1)
+    ax1.plot(df["timestamp_s"], df["elongation_smoothed"], label="LOWESS Smoothed %", color="blue", linewidth=1, alpha=0.6)
+    ax1.plot(df["timestamp_s"], df["elongation_monotonic"], label="Final Monotonic %", color="green", linewidth=2)
 
-    ax1.set_xlabel("Time (s)")
-    ax1.set_ylabel("Elongation (%)")
-    ax1.grid(True)
-    ax1.legend(loc="upper left")
+    # Yield point logic: always use max 2nd derivative (like analyze_elongation.py)
+    y_curve = df["elongation_monotonic"].to_numpy()
+    t_curve = df["timestamp_s"].to_numpy()
+    dy_dt = np.gradient(y_curve, t_curve)
+    d2y_dt2 = np.gradient(dy_dt, t_curve)
+    yield_index = int(np.argmax(d2y_dt2))
+    yield_time = df.loc[yield_index, "timestamp_s"] if yield_index is not None else None
+    yield_percent = df.loc[yield_index, "elongation_monotonic"] if yield_index is not None else None
+    yield_mm = (yield_percent - 100.0) * mm_per_percent if yield_percent is not None else None
+    if yield_time is not None and yield_mm is not None and yield_percent is not None:
+        ax1.axvline(yield_time, color='red', linestyle='--', label='Yield Point')
+        ax1.scatter([yield_time], [float(yield_percent)], color='red')
+
     ax1.set_title("Rebar Elongation Over Time (mm)")
-
-   # Replace left y-axis labels with mm values
+    ax1.set_xlabel("Time (s)")
+    # Use percent y-ticks but relabel as mm
     percent_ticks = ax1.get_yticks()
     mm_labels = [(v - 100.0) * mm_per_percent for v in percent_ticks]
     ax1.set_yticks(percent_ticks)
     ax1.set_yticklabels([f"{v:.3f} mm" for v in mm_labels])
     ax1.set_ylabel("Elongation (mm)")
-
-
-    if "strain_rate" in df.columns and len(df["strain_rate"].dropna()) > 0:
-        yield_index = df["strain_rate"].idxmax()
-        try:
-            yield_time = df.loc[yield_index, "timestamp_s"]
-            yield_percent = df.loc[yield_index, "elongation_smoothed_corrected"]
-            yield_mm = (yield_percent - 100.0) * mm_per_percent
-            ax1.axvline(yield_time, color='red', linestyle='--', label='Yield Point')
-            ax1.scatter([yield_time], [yield_percent], color='red')
-        except (KeyError, ValueError):
-            pass  # Skip if yield_index is invalid
-
+    ax1.grid(True)
+    ax1.legend()
     plt.tight_layout()
+    # Add number of frames annotation to main plot
+    ax1.text(0.99, 0.01, f"Frames used: {len(df)}", ha='right', va='bottom',
+             transform=ax1.transAxes, fontsize=10, color='gray')
     plt.savefig(output_plot_path)
     plt.close()
 

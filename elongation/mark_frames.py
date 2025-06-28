@@ -2,7 +2,6 @@ import os
 import cv2
 import numpy as np
 import pandas as pd
-from elongation.detect_markers import detect_markers
 from tqdm import tqdm
 from elongation.subpixel import subpixel_refine
 from sklearn.cluster import DBSCAN
@@ -15,16 +14,12 @@ def process_images(
     skip_end_frames=0,
     font=cv2.FONT_HERSHEY_SIMPLEX,
     font_scale=0.6,
-    color_ref=(0, 255, 255),    # Yellow
     color_curr=(255, 100, 100), # Blue
     color_grid=(200, 200, 200),
     color_middle=(0, 0, 255),   # Red
-    color_correction=(255, 0, 255), # Purple
     pattern_height=15,
     pattern_width=15,
     fallback_search_radius=50,
-    selection_weights={'statistical': 0, 'confidence': 0, 'temporal': 1},
-
     min_contrast=10,
     min_edge_strength=5,
     progress_callback=None,
@@ -33,7 +28,7 @@ def process_images(
     pattern_bottom_grid=3,
     num_divisions=75,  # NEW: number of grid points (patterns) to extract
     min_gap=25,        # NEW: minimum gap (in grid indices) between patterns for measurement
-    dbscan_eps=1     # DBSCAN clustering range for elongation grouping
+    dbscan_eps: float = 1     # DBSCAN clustering range for elongation grouping
 ):
     """
     pattern_top_grid: int (default 6) - grid line (0=bottom, 10=top) for top pattern extraction
