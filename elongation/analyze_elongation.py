@@ -75,18 +75,25 @@ def process_and_plot(
     if len(df) >= N and np.allclose(df["elongation_median"].values[-N:], df["elongation_median"].values[-1]):
         df["elongation_monotonic"].values[-N:] = df["elongation_median"].values[-1]
 
-    # Improved yield point detection: sustained increase in strain rate
-    strain_rate = df["elongation_monotonic"].diff() / df["timestamp_s"].diff()
-    threshold = 0.05  # adjust as needed
-    sustained = (strain_rate > threshold).rolling(window=3, min_periods=1).sum() >= 2
-    yield_candidates = np.where(sustained.values)[0].astype(int)
-    if len(yield_candidates) > 0:
-        yield_index = int(yield_candidates[0])
-    else:
-        yield_index = int(strain_rate.idxmax())
+    # --- Yield Point Detection: Maximum Change in Slope (Second Derivative) ---
+    # Use the monotonic curve for robust detection
+    y_curve = df["elongation_monotonic"].to_numpy()
+    t_curve = df["timestamp_s"].to_numpy()
+    
+    # Compute first and second derivatives
+    dy_dt = np.gradient(y_curve, t_curve)
+    d2y_dt2 = np.gradient(dy_dt, t_curve)
 
+    # Yield point: index of maximum second derivative (sharpest change in slope)
+    yield_index = int(np.argmax(d2y_dt2))
     yield_time = df.loc[yield_index, "timestamp_s"] if yield_index is not None else None
     yield_elongation = df.loc[yield_index, "elongation_monotonic"] if yield_index is not None else None
+
+    # Logging for yield point detection
+    notify_progress(0.95, f"[Yield Detection] Method: max 2nd derivative (change in slope)")
+    notify_progress(0.96, f"[Yield Detection] Index: {yield_index}, Time: {yield_time:.3f}s, Elongation: {yield_elongation:.3f}%")
+    if yield_index == 0 or yield_index == len(df) - 1:
+        notify_progress(0.97, f"[Yield Detection][Warning] Yield point at boundary (index={yield_index}). This may indicate a detection issue.")
 
     plt.figure(figsize=(10, 6))
     plt.plot(df["timestamp_s"], df["elongation_percent"], label="Raw %", linestyle="--", alpha=0.3)

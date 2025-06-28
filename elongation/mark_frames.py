@@ -5,6 +5,7 @@ import pandas as pd
 from elongation.detect_markers import detect_markers
 from tqdm import tqdm
 from elongation.subpixel import subpixel_refine
+from sklearn.cluster import DBSCAN
 
 def process_images(
     input_folder,
@@ -19,27 +20,36 @@ def process_images(
     color_grid=(200, 200, 200),
     color_middle=(0, 0, 255),   # Red
     color_correction=(255, 0, 255), # Purple
-    pattern_height=10,
-    pattern_width=10,
+    pattern_height=15,
+    pattern_width=15,
     fallback_search_radius=50,
-    selection_weights={'statistical': 0.3, 'confidence': 0.3, 'temporal': 0.4},
-    outlier_threshold=2.0,
-    temporal_smoothing_window=3,
-    enable_temporal_smoothing=True,
+    selection_weights={'statistical': 0, 'confidence': 0, 'temporal': 1},
+
     min_contrast=10,
     min_edge_strength=5,
     progress_callback=None,
     cancel_event=None,
-    pattern_top_grid=5,
-    pattern_bottom_grid=4
+    pattern_top_grid=7,
+    pattern_bottom_grid=3,
+    num_divisions=75,  # NEW: number of grid points (patterns) to extract
+    min_gap=25,        # NEW: minimum gap (in grid indices) between patterns for measurement
+    dbscan_eps=1     # DBSCAN clustering range for elongation grouping
 ):
     """
     pattern_top_grid: int (default 6) - grid line (0=bottom, 10=top) for top pattern extraction
     pattern_bottom_grid: int (default 3) - grid line (0=bottom, 10=top) for bottom pattern extraction
+    num_divisions: int - number of grid points (patterns) to extract between top and bottom
+    min_gap: int - minimum gap (in grid indices) between patterns for measurement
+    dbscan_eps: float - DBSCAN clustering range for elongation grouping
     """
+    # tqdm bar for main progress
+    main_bar = None
     def notify_progress(p, msg):
+        nonlocal main_bar
         if progress_callback:
             progress_callback(p, msg)
+        elif main_bar is not None:
+            main_bar.set_postfix_str(msg)
         else:
             print(f"{int(p*100)}% - {msg}")
 
@@ -171,105 +181,23 @@ def process_images(
         recent_values = elongation_history[-window_size:]
         return np.mean(recent_values)
 
-    def select_best_elongation(elongations, scores, pattern_qualities, previous_elongation=None, 
-                              weights={'statistical': 0.4, 'confidence': 0.3, 'temporal': 0.3}):
+    def select_best_elongation(elongations, scores, pattern_qualities, previous_elongation=None, weights=None):
         """
-        Select best elongation using hybrid approach combining multiple criteria.
-        
-        Args:
-            elongations: List of 6 elongation percentages [all possible combinations]
-            scores: List of 6 OpenCV correlation scores [all possible combinations]
-            pattern_qualities: List of 6 pattern quality scores
-            previous_elongation: Previous frame's elongation percentage (optional)
-            weights: Dictionary of weights for each criterion
-            
-        Returns:
-            best_elongation: Selected elongation percentage
-            best_idx: Index of selected elongation
-            confidence_score: Overall confidence in the selection (0-1)
+        Select the minimum elongation value that is higher than the previous frame's elongation (if any),
+        otherwise select the minimum value. Label as 'min_increase' if a higher value is found, otherwise 'min'.
         """
-        if len(elongations) != 6 or len(scores) != 6 or len(pattern_qualities) != 6:
-            return elongations[0] if elongations else 0.0, 0, 0.5  # Fallback to first value
-        
-        # Filter out values under 100%
-        valid_indices = [i for i, e in enumerate(elongations) if e is not None and e >= 100.0]
+        valid_indices = [i for i, e in enumerate(elongations) if e is not None]
         if not valid_indices:
-            # If no values >= 100%, use all valid values
-            valid_indices = [i for i, e in enumerate(elongations) if e is not None]
-        
-        if not valid_indices:
-            return elongations[0] if elongations else 0.0, 0, 0.5
-        
+            return 0.0, 0, 0.0, 'min'
         valid_elongations = [elongations[i] for i in valid_indices]
-        valid_scores = [scores[i] for i in valid_indices]
-        valid_qualities = [pattern_qualities[i] for i in valid_indices]
-        
-        # Detect outliers
-        outlier_flags = detect_outliers(valid_elongations, outlier_threshold)
-        non_outlier_indices = [i for i, is_outlier in enumerate(outlier_flags) if not is_outlier]
-        
-        if not non_outlier_indices:
-            # If all are outliers, use all values
-            non_outlier_indices = list(range(len(valid_elongations)))
-        
-        final_elongations = [valid_elongations[i] for i in non_outlier_indices]
-        final_scores = [valid_scores[i] for i in non_outlier_indices]
-        final_qualities = [valid_qualities[i] for i in non_outlier_indices]
-        
-        if not final_elongations:
-            return elongations[0] if elongations else 0.0, 0, 0.5
-        
-        # Normalize scores to 0-1 range
-        max_score = max(final_scores)
-        min_score = min(final_scores)
-        if max_score == min_score:
-            normalized_scores = [0.5] * len(final_scores)  # All equal
-        else:
-            normalized_scores = [(s - min_score) / (max_score - min_score) for s in final_scores]
-        
-        # Normalize pattern qualities
-        max_quality = max(final_qualities)
-        min_quality = min(final_qualities)
-        if max_quality == min_quality:
-            normalized_qualities = [0.5] * len(final_qualities)
-        else:
-            normalized_qualities = [(q - min_quality) / (max_quality - min_quality) for q in final_qualities]
-        
-        # 1. Statistical criterion: Distance from median
-        median_elongation = np.median(final_elongations)
-        max_elongation = max(final_elongations)
-        statistical_scores = [1.0 - min(abs(e - median_elongation) / max_elongation, 1.0) for e in final_elongations]
-        
-        # 2. Enhanced confidence criterion: Combine OpenCV scores and pattern quality
-        confidence_scores = [(ns + nq) / 2 for ns, nq in zip(normalized_scores, normalized_qualities)]
-        
-        # 3. Temporal criterion: Consistency with previous frame
         if previous_elongation is not None:
-            # Calculate reasonable change threshold (e.g., 5% of previous value)
-            change_threshold = max(previous_elongation * 0.05, 2.0)  # At least 2% or 5% of previous
-            temporal_scores = [1.0 - min(abs(e - previous_elongation) / change_threshold, 1.0) for e in final_elongations]
-        else:
-            temporal_scores = [0.5] * len(final_elongations)  # Neutral if no previous frame
-        
-        # Combine all criteria with weights
-        combined_scores = []
-        for i in range(len(final_elongations)):
-            combined_score = (
-                weights['statistical'] * statistical_scores[i] +
-                weights['confidence'] * confidence_scores[i] +
-                weights['temporal'] * temporal_scores[i]
-            )
-            combined_scores.append(combined_score)
-        
-        # Select best elongation
-        best_idx = np.argmax(combined_scores)
-        best_elongation = final_elongations[best_idx]
-        confidence_score = combined_scores[best_idx]
-        
-        # Map back to original indices
-        original_best_idx = valid_indices[non_outlier_indices[best_idx]]
-        
-        return best_elongation, original_best_idx, confidence_score
+            higher_indices = [i for i, e in zip(valid_indices, valid_elongations) if e > previous_elongation]
+            if higher_indices:
+                min_idx = min(higher_indices, key=lambda i: elongations[i])
+                return elongations[min_idx], min_idx, 1.0, 'min_increase'
+        # fallback: just select minimum
+        min_idx = min(valid_indices, key=lambda i: elongations[i])
+        return elongations[min_idx], min_idx, 1.0, 'min'
 
     def draw_reference_grid(img, ref_top, ref_bottom, ref_distance):
         h, w = img.shape[:2]
@@ -287,11 +215,12 @@ def process_images(
     os.makedirs(output_folder, exist_ok=True)
     frames = sorted(f for f in os.listdir(input_folder) if f.endswith(('.jpg', '.png')))
     frames = frames[skip_start_frames: len(frames) - skip_end_frames]
-    notify_progress(0.1,f"🔎 Total usable frames after skip: {len(frames)}")
+    main_bar = tqdm(total=len(frames), desc="Marking frames", unit="frame")
+    notify_progress(0.1, f"🔎 Total usable frames after skip: {len(frames)}")
 
     # Precompute all images
     precomputed = {}
-    for frame in tqdm(frames, desc="Precomputing grayscale"):
+    for frame in tqdm(frames, desc="Precomputing grayscale", leave=False):
         if cancel_event and cancel_event.is_set():
             notify_progress(1.0, "Processing cancelled by user.")
             break
@@ -305,293 +234,211 @@ def process_images(
         return
 
     # Extract patterns from first frame
-    notify_progress(0.2,"🗕 Extracting patterns from first frame...")
+    notify_progress(0.2, "Extracting patterns from first frame...")
     first_frame = frames[0]
     img, gray = precomputed[first_frame]
     center_x = detect_rebar_center_x(gray)
     h = gray.shape[0]
-    
-    # Calculate pattern positions using grid system
-    y_grid_7 = int((10 - 7) * h / 10)
-    y_grid_6 = int((10 - 6) * h / 10)
-    y_grid_5 = int((10 - 5) * h / 10)
-    y_grid_4 = int((10 - 4) * h / 10)
-    y_grid_3 = int((10 - 3) * h / 10)
-    
-    print(f"[DEBUG] Pattern extraction positions: grid_7={y_grid_7}, grid_6={y_grid_6}, grid_5={y_grid_5}, grid_4={y_grid_4}, grid_3={y_grid_3}")
-    
-    # Extract patterns
-    pattern_7 = extract_pattern(gray, center_x, y_grid_7)
-    pattern_6 = extract_pattern(gray, center_x, y_grid_6)
-    pattern_5 = extract_pattern(gray, center_x, y_grid_5)
-    pattern_4 = extract_pattern(gray, center_x, y_grid_4)
-    pattern_3 = extract_pattern(gray, center_x, y_grid_3)
-    
-    # Validate patterns
-    patterns = [pattern_7, pattern_6, pattern_5, pattern_4, pattern_3]
-    pattern_names = ['7', '6', '5', '4', '3']
+
+    # Generate grid positions (from top to bottom)
+    grid_indices = np.linspace(pattern_top_grid, pattern_bottom_grid, num_divisions)
+    y_grids = [int((10 - g) * h / 10) for g in grid_indices]
+
+    # Extract patterns at each grid position
+    patterns = [extract_pattern(gray, center_x, y) for y in y_grids]
+    pattern_names = [f"{g:.2f}" for g in grid_indices]
     valid_patterns = []
-    
     for i, (pattern, name) in enumerate(zip(patterns, pattern_names)):
         if pattern is not None and validate_pattern(pattern, min_contrast, min_edge_strength):
-            valid_patterns.append((pattern, name))
-            print(f"[DEBUG] Pattern {name} validated successfully")
-        else:
-            print(f"[DEBUG] Pattern {name} failed validation")
-    
-    if len(valid_patterns) < 3:
-        notify_progress(1.0,"❌ Could not extract enough valid patterns. Exiting.")
+            valid_patterns.append((pattern, name, y_grids[i]))
+    if len(valid_patterns) < 2:
+        notify_progress(1.0, "❌ Could not extract enough valid patterns. Exiting.")
         return
 
     # Find reference positions from first frame
     x1 = max(center_x - pattern_width // 2, 0)
     x2 = min(center_x + pattern_width // 2, gray.shape[1])
     strip = gray[:, x1:x2]
-    
-    ref_y_7, _ = find_pattern_near_reference(strip, pattern_7, y_grid_7)
-    ref_y_6, _ = find_pattern_near_reference(strip, pattern_6, y_grid_6)
-    ref_y_5, _ = find_pattern_near_reference(strip, pattern_5, y_grid_5)
-    ref_y_4, _ = find_pattern_near_reference(strip, pattern_4, y_grid_4)
-    ref_y_3, _ = find_pattern_near_reference(strip, pattern_3, y_grid_3)
-    
-    if ref_y_7 is None or ref_y_6 is None or ref_y_5 is None or ref_y_4 is None or ref_y_3 is None:
-        notify_progress(1.0,"❌ Could not establish all reference positions. Exiting.")
+    ref_ys = []
+    for pattern, name, y_grid in valid_patterns:
+        ref_y, _ = find_pattern_near_reference(strip, pattern, y_grid)
+        ref_ys.append(ref_y)
+    if any(y is None for y in ref_ys):
+        notify_progress(1.0, "❌ Could not establish all reference positions. Exiting.")
         return
 
-    # Calculate reference gauge lengths for all valid combinations (min gap = 2)
-    ref_gauge_lengths = {
-        '7_to_5': ref_y_5 - ref_y_7,  # gap = 2
-        '7_to_4': ref_y_4 - ref_y_7,  # gap = 3
-        '7_to_3': ref_y_3 - ref_y_7,  # gap = 4
-        '6_to_4': ref_y_4 - ref_y_6,  # gap = 2
-        '6_to_3': ref_y_3 - ref_y_6,  # gap = 3
-        '5_to_3': ref_y_3 - ref_y_5   # gap = 2
-    }
-    
-    print(f"[DEBUG] Reference positions - Grid 7: {ref_y_7}, Grid 6: {ref_y_6}, Grid 5: {ref_y_5}, Grid 4: {ref_y_4}, Grid 3: {ref_y_3}")
-    print(f"[DEBUG] Reference gauge lengths: {ref_gauge_lengths}")
+    # Calculate reference gauge lengths for all valid pairs (min_gap)
+    ref_gauge_lengths = {}
+    pattern_count = len(valid_patterns)
+    for i in range(pattern_count):
+        for j in range(i + min_gap, pattern_count):
+            key = f"{i}_to_{j}"
+            ref_gauge_lengths[key] = ref_ys[j] - ref_ys[i]
 
     data = []
     previous_elongation_percent = None
     elongation_history = []  # For temporal smoothing
-    
-    print("🖼 Drawing overlays and saving output frames...")
-    for frame_idx, frame in enumerate(tqdm(frames, desc="Processing frames")):
+
+    for frame_idx, frame in enumerate(tqdm(frames, desc="Processing frames", leave=False)):
         if cancel_event and cancel_event.is_set():
             notify_progress(1.0, "Processing cancelled by user.")
             break
-
         img, gray = precomputed[frame]
         center_x = detect_rebar_center_x(gray)
-        
         x1 = max(center_x - pattern_width // 2, 0)
         x2 = min(center_x + pattern_width // 2, gray.shape[1])
         strip = gray[:, x1:x2]
-
-        # Find current positions for all 5 patterns
-        y_7, score_7 = find_pattern_near_reference(strip, pattern_7, ref_y_7)
-        y_6, score_6 = find_pattern_near_reference(strip, pattern_6, ref_y_6)
-        y_5, score_5 = find_pattern_near_reference(strip, pattern_5, ref_y_5)
-        y_4, score_4 = find_pattern_near_reference(strip, pattern_4, ref_y_4)
-        y_3, score_3 = find_pattern_near_reference(strip, pattern_3, ref_y_3)
-
+        # Find current positions for all patterns
+        curr_ys = []
+        curr_scores = []
+        for (pattern, name, y_grid) in valid_patterns:
+            y, score = find_pattern_near_reference(strip, pattern, y_grid)
+            curr_ys.append(y)
+            curr_scores.append(score)
         # Calculate pattern qualities
-        pattern_qualities = []
-        for pattern in [pattern_7, pattern_6, pattern_5, pattern_4, pattern_3]:
-            quality = calculate_pattern_quality(pattern)
-            pattern_qualities.append(quality)
-
-        # Calculate all 6 possible elongation measurements (min gap = 2)
+        pattern_qualities = [calculate_pattern_quality(pattern) for (pattern, _, _) in valid_patterns]
+        # Calculate all possible elongation measurements (min_gap)
+        pair_indices = [(i, j) for i in range(pattern_count) for j in range(i + min_gap, pattern_count)]
+        num_pairs = len(pair_indices)
+        min_samples = max(2, int(num_pairs * 0.35))
+        if frame_idx == 0:
+            print(f"  Total pairs to calculate: {num_pairs}")
+            print(f"  DBSCAN min_samples (35% of pairs): {min_samples}")
         elongations = []
         scores = []
-        positions = []  # Store positions for each measurement
-        measurement_names = []  # For debugging
-        combined_qualities = []  # Combined pattern qualities for each measurement
-        
-        # 1. 7 → 5 (gap = 2)
-        if all([y_7 is not None, y_5 is not None]):
-            assert y_7 is not None and y_5 is not None
-            elongation_7_to_5 = y_5 - y_7
-            elongation_7_to_5_percent = safe_elongation_calculation(y_5, y_7, ref_gauge_lengths['7_to_5'])
-            elongations.append(elongation_7_to_5_percent)
-            scores.append((score_7 or 0.0) + (score_5 or 0.0))
-            positions.append((y_7, y_5))
-            measurement_names.append("7→5")
-            combined_qualities.append((pattern_qualities[0] + pattern_qualities[2]) / 2)  # 7 and 5
-        else:
-            elongations.append(None)
-            scores.append(0.0)
-            positions.append((None, None))
-            measurement_names.append("7→5")
-            combined_qualities.append(0.0)
-        
-        # 2. 7 → 4 (gap = 3)
-        if all([y_7 is not None, y_4 is not None]):
-            assert y_7 is not None and y_4 is not None
-            elongation_7_to_4 = y_4 - y_7
-            elongation_7_to_4_percent = safe_elongation_calculation(y_4, y_7, ref_gauge_lengths['7_to_4'])
-            elongations.append(elongation_7_to_4_percent)
-            scores.append((score_7 or 0.0) + (score_4 or 0.0))
-            positions.append((y_7, y_4))
-            measurement_names.append("7→4")
-            combined_qualities.append((pattern_qualities[0] + pattern_qualities[3]) / 2)  # 7 and 4
-        else:
-            elongations.append(None)
-            scores.append(0.0)
-            positions.append((None, None))
-            measurement_names.append("7→4")
-            combined_qualities.append(0.0)
-        
-        # 3. 7 → 3 (gap = 4)
-        if all([y_7 is not None, y_3 is not None]):
-            assert y_7 is not None and y_3 is not None
-            elongation_7_to_3 = y_3 - y_7
-            elongation_7_to_3_percent = safe_elongation_calculation(y_3, y_7, ref_gauge_lengths['7_to_3'])
-            elongations.append(elongation_7_to_3_percent)
-            scores.append((score_7 or 0.0) + (score_3 or 0.0))
-            positions.append((y_7, y_3))
-            measurement_names.append("7→3")
-            combined_qualities.append((pattern_qualities[0] + pattern_qualities[4]) / 2)  # 7 and 3
-        else:
-            elongations.append(None)
-            scores.append(0.0)
-            positions.append((None, None))
-            measurement_names.append("7→3")
-            combined_qualities.append(0.0)
-        
-        # 4. 6 → 4 (gap = 2)
-        if all([y_6 is not None, y_4 is not None]):
-            assert y_6 is not None and y_4 is not None
-            elongation_6_to_4 = y_4 - y_6
-            elongation_6_to_4_percent = safe_elongation_calculation(y_4, y_6, ref_gauge_lengths['6_to_4'])
-            elongations.append(elongation_6_to_4_percent)
-            scores.append((score_6 or 0.0) + (score_4 or 0.0))
-            positions.append((y_6, y_4))
-            measurement_names.append("6→4")
-            combined_qualities.append((pattern_qualities[1] + pattern_qualities[3]) / 2)  # 6 and 4
-        else:
-            elongations.append(None)
-            scores.append(0.0)
-            positions.append((None, None))
-            measurement_names.append("6→4")
-            combined_qualities.append(0.0)
-
-        # 5. 6 → 3 (gap = 3)
-        if all([y_6 is not None, y_3 is not None]):
-            assert y_6 is not None and y_3 is not None
-            elongation_6_to_3 = y_3 - y_6
-            elongation_6_to_3_percent = safe_elongation_calculation(y_3, y_6, ref_gauge_lengths['6_to_3'])
-            elongations.append(elongation_6_to_3_percent)
-            scores.append((score_6 or 0.0) + (score_3 or 0.0))
-            positions.append((y_6, y_3))
-            measurement_names.append("6→3")
-            combined_qualities.append((pattern_qualities[1] + pattern_qualities[4]) / 2)  # 6 and 3
-        else:
-            elongations.append(None)
-            scores.append(0.0)
-            positions.append((None, None))
-            measurement_names.append("6→3")
-            combined_qualities.append(0.0)
-        
-        # 6. 5 → 3 (gap = 2)
-        if all([y_5 is not None, y_3 is not None]):
-            assert y_5 is not None and y_3 is not None
-            elongation_5_to_3 = y_3 - y_5
-            elongation_5_to_3_percent = safe_elongation_calculation(y_3, y_5, ref_gauge_lengths['5_to_3'])
-            elongations.append(elongation_5_to_3_percent)
-            scores.append((score_5 or 0.0) + (score_3 or 0.0))
-            positions.append((y_5, y_3))
-            measurement_names.append("5→3")
-            combined_qualities.append((pattern_qualities[2] + pattern_qualities[4]) / 2)  # 5 and 3
-        else:
-            elongations.append(None)
-            scores.append(0.0)
-            positions.append((None, None))
-            measurement_names.append("5→3")
-            combined_qualities.append(0.0)
-
+        positions = []
+        measurement_names = []
+        combined_qualities = []
+        for i, j in tqdm(pair_indices, desc='Pairwise elongation', unit='pair', leave=False):
+            if curr_ys[i] is not None and curr_ys[j] is not None:
+                elongation = curr_ys[j] - curr_ys[i]
+                key = f"{i}_to_{j}"
+                elongation_percent = safe_elongation_calculation(curr_ys[j], curr_ys[i], ref_gauge_lengths[key])
+                elongations.append(elongation_percent)
+                scores.append((curr_scores[i] or 0.0) + (curr_scores[j] or 0.0))
+                positions.append((curr_ys[i], curr_ys[j]))
+                measurement_names.append(key)
+                combined_qualities.append((pattern_qualities[i] + pattern_qualities[j]) / 2)
+            else:
+                elongations.append(None)
+                scores.append(0.0)
+                positions.append((None, None))
+                measurement_names.append(f"{i}_to_{j}")
+                combined_qualities.append(0.0)
         # Select best elongation using hybrid approach
         valid_elongations = [e for e in elongations if e is not None]
-        valid_scores = [s for i, s in enumerate(scores) if elongations[i] is not None]
-        valid_qualities = [combined_qualities[i] for i, e in enumerate(elongations) if e is not None]
-        valid_names = [measurement_names[i] for i, e in enumerate(elongations) if e is not None]
-        
+        valid_scores = [s for idx, s in enumerate(scores) if elongations[idx] is not None]
+        valid_qualities = [combined_qualities[idx] for idx, e in enumerate(elongations) if e is not None]
+        valid_names = [measurement_names[idx] for idx, e in enumerate(elongations) if e is not None]
         if len(valid_elongations) > 0:
-            best_elongation_percent, best_idx, confidence_score = select_best_elongation(
-                elongations, scores, combined_qualities, previous_elongation_percent, selection_weights
-            )
-            
-            # Get the selected positions
-            selected_top_y, selected_bottom_y = positions[best_idx]
-            selected_measurement_name = measurement_names[best_idx]
-            
-            # Apply temporal smoothing if enabled
-            if enable_temporal_smoothing:
-                elongation_history.append(best_elongation_percent)
-                if len(elongation_history) > temporal_smoothing_window:
-                    elongation_history.pop(0)
-                smoothed_elongation = apply_temporal_smoothing(elongation_history, temporal_smoothing_window)
-                best_elongation_percent = smoothed_elongation
-            
-            print(f"[DEBUG] Frame {frame}: Selected measurement {best_idx} ({selected_measurement_name}) with confidence {confidence_score:.3f}")
-            print(f"[DEBUG] Frame {frame}: All elongations: {[f'{m}={e:.2f}%' if e is not None else f'{m}=None' for m, e in zip(measurement_names, elongations)]}")
+            # --- Adaptive DBSCAN clustering on elongation values ---
+            elong_array = np.array([e for e in elongations if e is not None]).reshape(-1, 1)
+            if len(elong_array) > 0:
+                default_eps = dbscan_eps
+                max_eps = 5.0
+                eps = default_eps
+                found_cluster = False
+                while True:
+                    db = DBSCAN(eps=eps, min_samples=min_samples).fit(elong_array)
+                    labels, counts = np.unique(db.labels_, return_counts=True)
+                    valid_labels = labels[labels != -1]
+                    if len(valid_labels) > 0:
+                        # Find the largest cluster (by member count)
+                        main_label = valid_labels[np.argmax(counts[labels != -1])]
+                        main_group = elong_array[db.labels_ == main_label].flatten()
+                        median_elong = float(np.median(main_group))
+                        best_elongation_percent = median_elong
+                        confidence_score = 1.0
+                        selection_type = 'dbscan_median'
+                        found_cluster = True
+                        break
+                    else:
+                        eps *= 2
+                        if eps > max_eps:
+                            median_elong = float(np.min(elong_array))
+                            best_elongation_percent = median_elong
+                            confidence_score = 1.0
+                            selection_type = 'min_fallback'
+                            break
+            else:
+                median_elong = 0.0
+                best_elongation_percent = median_elong
+                confidence_score = 1.0
+                selection_type = 'empty'
+            # Find the pair whose elongation is closest to the median
+            if len(elong_array) > 0:
+                closest_idx = np.argmin(np.abs(elong_array.flatten() - median_elong))
+                selected_measurement_name = measurement_names[closest_idx]
+                selected_top_y, selected_bottom_y = positions[closest_idx]
+                # Get cluster member count for display
+                if selection_type == 'dbscan_median':
+                    cluster_members = len(main_group)
+                    cluster_info = f"{cluster_members}/{num_pairs}"
+                else:
+                    cluster_info = f"1/{num_pairs}"
+            else:
+                selected_measurement_name = 'none'
+                selected_top_y, selected_bottom_y = 0, 0
+                cluster_info = f"0/{num_pairs}"
         else:
-            # Fallback: try wider search radius
-            if y_7 is None:
-                y_7, _ = find_pattern_near_reference(strip, pattern_7, ref_y_7, fallback_search_radius)
-            if y_5 is None:
-                y_5, _ = find_pattern_near_reference(strip, pattern_5, ref_y_5, fallback_search_radius)
-            
-            if y_7 is None or y_5 is None:
+            # Fallback: try wider search radius for first and last pattern
+            y_first, _ = find_pattern_near_reference(strip, valid_patterns[0][0], valid_patterns[0][2], fallback_search_radius)
+            y_last, _ = find_pattern_near_reference(strip, valid_patterns[-1][0], valid_patterns[-1][2], fallback_search_radius)
+            if y_first is None or y_last is None:
                 continue
-                
-            selected_top_y, selected_bottom_y = y_7, y_5
-            best_elongation_percent = safe_elongation_calculation(y_5, y_7, ref_gauge_lengths['7_to_5'])
-            confidence_score = 0.5  # Low confidence for fallback
+            selected_top_y, selected_bottom_y = y_first, y_last
+            key = f"0_to_{pattern_count-1}"
+            best_elongation_percent = safe_elongation_calculation(y_last, y_first, ref_gauge_lengths[key])
+            confidence_score = 0.5
             best_idx = 0
-            selected_measurement_name = "7→5 (fallback)"
-
-        # Update previous elongation for next frame
+            selected_measurement_name = key + " (fallback)"
+            selection_type = "fallback"  # Add selection type for fallback case
+            main_bar.set_postfix({
+                "frame": frame,
+                "meas": selected_measurement_name,
+                "elong%": f"{best_elongation_percent:.2f}",
+                "conf": f"{confidence_score:.2f}",
+                "selection_type": selection_type
+            })
         previous_elongation_percent = best_elongation_percent
-
-        # Calculate final elongation using dynamic gauge length
-        selected_gauge_length = ref_gauge_lengths[selected_measurement_name.replace('→', '_to_').replace(' (fallback)', '')]
+        selected_gauge_length = ref_gauge_lengths[selected_measurement_name.replace(' (fallback)', '')]
         elongation_px = selected_bottom_y - selected_top_y - selected_gauge_length
         elongation_percent = best_elongation_percent
-
-        # Draw reference grid (no yellow lines)
         cv2.line(img, (center_x, 0), (center_x, img.shape[0]), color_middle, 1)
-        draw_reference_grid(img, int(round(ref_y_7)), int(round(ref_y_5)), selected_gauge_length)
-
-        # Draw blue lines at the selected positions
+        draw_reference_grid(img, int(round(ref_ys[0])), int(round(ref_ys[-1])), selected_gauge_length)
         cv2.line(img, (0, int(round(selected_top_y))), (img.shape[1], int(round(selected_top_y))), color_curr, 2)
         cv2.line(img, (0, int(round(selected_bottom_y))), (img.shape[1], int(round(selected_bottom_y))), color_curr, 2)
-        cv2.putText(img, f"{(selected_bottom_y - selected_top_y):.2f}px ({elongation_percent:.2f}%)", (img.shape[1] - 250, int(round(selected_top_y)) - 10), font, font_scale, color_curr, 2)
-
+        
+        # Display only the elongation percentage, no cluster_type text
+        selection_text = f"{(selected_bottom_y - selected_top_y):.2f}px ({elongation_percent:.2f}%) {cluster_info}"
+        # Center the text horizontally
+        text_size = cv2.getTextSize(selection_text, font, font_scale, 2)[0]
+        text_x = (img.shape[1] - text_size[0]) // 2
+        cv2.putText(img, selection_text, (text_x, int(round(selected_top_y)) - 10), font, font_scale, color_curr, 2)
         output_path = os.path.join(output_folder, frame)
         cv2.imwrite(output_path, img)
-
         timestamp_str = os.path.splitext(frame)[0].split('_')[-1].replace('s', '')
         data.append({
             "frame": frame,
             "timestamp_s": float(timestamp_str),
-            "ref_top_px": ref_y_7,
-            "ref_bottom_px": ref_y_5,
+            "ref_top_px": ref_ys[0],
+            "ref_bottom_px": ref_ys[-1],
             "curr_top_px": selected_top_y,
             "curr_bottom_px": selected_bottom_y,
             "elongation_px": elongation_px,
             "elongation_percent": elongation_percent,
             "selected_measurement": selected_measurement_name,
             "confidence_score": confidence_score,
+            "selection_type": selection_type,
             "measurements_available": len(valid_elongations)
         })
-
+        main_bar.update(1)
     if cancel_event and cancel_event.is_set():
         notify_progress(1.0, "Processing cancelled by user.")
         return
-        
     pd.DataFrame(data).to_csv(csv_output_path, index=False)
-    notify_progress(1.0,f"✔ All done! Marked frames in '{output_folder}', data in '{csv_output_path}'")
+    notify_progress(1.0, f"✔ All done! Marked frames in '{output_folder}', data in '{csv_output_path}'")
+    main_bar.close()
 
 if __name__ == "__main__":
     process_images("output_frames", "elongation_marked_frames", "elongation_data.csv")

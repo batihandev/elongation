@@ -385,7 +385,8 @@ def find_enhanced_stable_start_frame(
     video_path, fps, max_check_frames=300, focus_threshold=50, 
     motion_threshold=200, edge_threshold=30, bg_threshold=20,
     min_consecutive_stable=10,
-    orb_frame_gap=5, orb_translation_threshold=0.2, orb_required_consecutive_stable=5
+    orb_frame_gap=5, orb_translation_threshold=0.2, orb_required_consecutive_stable=5,
+    tqdm_bar=None
 ):
     """
     Enhanced stability detection using multiple methods:
@@ -411,10 +412,12 @@ def find_enhanced_stable_start_frame(
     Returns:
         tuple: (start_frame, start_time_seconds, stability_info)
     """
+    import warnings
+    from tqdm import tqdm
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Failed to open video: {video_path}")
-    print(f"[DEBUG] ORB parameters: orb_frame_gap={orb_frame_gap}, orb_translation_threshold={orb_translation_threshold}, orb_required_consecutive_stable={orb_required_consecutive_stable}")
+    # Remove all print/debug logs, use tqdm.write only for summary
     orb_checked_indices = []
     stable_count = 0
     focus_scores = []
@@ -432,16 +435,12 @@ def find_enhanced_stable_start_frame(
     orb_first_stable_after_unstable = None
     orb_in_unstable = False
     orb_idx = 0
-    print(f"🔍 Enhanced stability detection on first {max_check_frames} frames...")
-    print(f"   Focus threshold: {focus_threshold}, Motion threshold: {motion_threshold}")
-    print(f"   Edge threshold: {edge_threshold}, Background threshold: {bg_threshold}")
-    print(f"   ORB: frame_gap={orb_frame_gap}, translation_threshold={orb_translation_threshold}, required_consecutive_stable={orb_required_consecutive_stable}")
+    # Only show a single summary at the end
     for frame_idx in range(max_check_frames):
         success, frame = cap.read()
         if not success:
             break
         timestamp = frame_idx / fps
-        # Focus, motion, edge, background checks (as before)
         is_focused, focus_score = detect_focus_quality(frame, focus_threshold)
         is_motion_stable, motion_score, motion_vectors = detect_motion_quality(
             frame, prev_frame, motion_threshold
@@ -458,7 +457,6 @@ def find_enhanced_stable_start_frame(
         bg_scores.append(bg_score)
         rebar_scores.append(rebar_score)
         frame_times.append(timestamp)
-        # ORB-based check (every orb_frame_gap frames)
         orb_stable = True
         if frame_idx >= orb_frame_gap and frame_idx % orb_frame_gap == 0:
             orb_checked_indices.append(frame_idx)
@@ -480,46 +478,24 @@ def find_enhanced_stable_start_frame(
                 if orb_consecutive_stable == orb_required_consecutive_stable and orb_first_stable_after_unstable is None:
                     orb_first_stable_after_unstable = frame_idx - (orb_required_consecutive_stable - 1) * orb_frame_gap
                     orb_in_unstable = False
-        # Frame is stable if ALL checks pass (including ORB if at this frame)
         is_frame_stable = is_focused and is_motion_stable and is_edge_stable and is_bg_stable
         if frame_idx >= orb_frame_gap and frame_idx % orb_frame_gap == 0:
             is_frame_stable = is_frame_stable and orb_stable
-        
-        # Don't count frames as stable until we've had at least one ORB check
-        # and if ORB detected instability, we need to wait for it to become stable again
         if frame_idx < orb_frame_gap:
-            # Before first ORB check, don't count as stable
             is_frame_stable = False
         elif orb_in_unstable and orb_first_stable_after_unstable is None:
-            # If we're in an unstable period and haven't found the stable point yet, don't count as stable
             is_frame_stable = False
         elif orb_first_stable_after_unstable is not None and frame_idx < orb_first_stable_after_unstable:
-            # We're still in the unstable period, don't count as stable
             is_frame_stable = False
-        
-        # Shortened log: only print for first 2 frames, then every 5th frame
-        if frame_idx < 2 or frame_idx % 5 == 0:
-            print(f"   Frame {frame_idx:3d} ({timestamp:5.2f}s): "
-                  f"Focus={is_focused}, Motion={is_motion_stable}, Edge={is_edge_stable}, BG={is_bg_stable}, ORB={orb_stable if frame_idx >= orb_frame_gap and frame_idx % orb_frame_gap == 0 else '-'}")
-            print(f"      Scores: F={focus_score:6.1f}, M={motion_score:6.1f}, E={edge_score:6.1f}, "
-                  f"BG={bg_score:6.1f}, Rebar={rebar_score:6.1f}")
-        
         if is_frame_stable:
             stable_count += 1
-            # Only return early if we've found a stable period after ORB instability
-            # or if we've checked enough frames without finding any ORB instability
             if stable_count >= min_consecutive_stable:
-                # If ORB detected instability, make sure we're past the stable point
                 if orb_first_stable_after_unstable is not None and frame_idx >= orb_first_stable_after_unstable:
                     cap.release()
                     start_time = timestamp - (min_consecutive_stable / fps)
                     start_frame = max(0, frame_idx - min_consecutive_stable)
-                    print(f"✅ Enhanced stable frame detected at frame {start_frame} (time: {start_time:.2f}s)")
-                    print(f"   Focus scores: min={min(focus_scores):.1f}, max={max(focus_scores):.1f}, avg={np.mean(focus_scores):.1f}")
-                    print(f"   Motion scores: min={min(motion_scores):.1f}, max={max(motion_scores):.1f}, avg={np.mean(motion_scores):.1f}")
-                    print(f"   Edge scores: min={min(edge_scores):.1f}, max={max(edge_scores):.1f}, avg={np.mean(edge_scores):.1f}")
-                    print(f"   Background scores: min={min(bg_scores):.1f}, max={max(bg_scores):.1f}, avg={np.mean(bg_scores):.1f}")
-                    print(f"   ORB: first_unstable={orb_first_unstable}, last_unstable={orb_last_unstable}, first_stable_after_unstable={orb_first_stable_after_unstable}")
+                    from tqdm import tqdm
+                    tqdm.write(f"✅ Enhanced stable frame detected at frame {start_frame} (time: {start_time:.2f}s)")
                     return start_frame, start_time, {
                         'focus_scores': focus_scores,
                         'motion_scores': motion_scores,
@@ -538,17 +514,12 @@ def find_enhanced_stable_start_frame(
                         'orb_translation_threshold': orb_translation_threshold,
                         'orb_required_consecutive_stable': orb_required_consecutive_stable
                     }
-                # If no ORB instability detected yet, but we've checked enough frames, use the first stable period
-                elif orb_first_unstable is None and frame_idx >= 50:  # Check at least 50 frames for ORB instability
+                elif orb_first_unstable is None and frame_idx >= 50:
                     cap.release()
                     start_time = timestamp - (min_consecutive_stable / fps)
                     start_frame = max(0, frame_idx - min_consecutive_stable)
-                    print(f"✅ Enhanced stable frame detected at frame {start_frame} (time: {start_time:.2f}s)")
-                    print(f"   Focus scores: min={min(focus_scores):.1f}, max={max(focus_scores):.1f}, avg={np.mean(focus_scores):.1f}")
-                    print(f"   Motion scores: min={min(motion_scores):.1f}, max={max(motion_scores):.1f}, avg={np.mean(motion_scores):.1f}")
-                    print(f"   Edge scores: min={min(edge_scores):.1f}, max={max(edge_scores):.1f}, avg={np.mean(edge_scores):.1f}")
-                    print(f"   Background scores: min={min(bg_scores):.1f}, max={max(bg_scores):.1f}, avg={np.mean(bg_scores):.1f}")
-                    print(f"   ORB: first_unstable={orb_first_unstable}, last_unstable={orb_last_unstable}, first_stable_after_unstable={orb_first_stable_after_unstable}")
+                    from tqdm import tqdm
+                    tqdm.write(f"✅ Enhanced stable frame detected at frame {start_frame} (time: {start_time:.2f}s)")
                     return start_frame, start_time, {
                         'focus_scores': focus_scores,
                         'motion_scores': motion_scores,
@@ -571,12 +542,8 @@ def find_enhanced_stable_start_frame(
             stable_count = 0
         prev_frame = frame.copy()
     cap.release()
-    print(f"⚠️ No enhanced stable frames detected in first {max_check_frames} frames")
-    print(f"   Score ranges - Focus: {min(focus_scores):.1f}-{max(focus_scores):.1f}, "
-          f"Motion: {min(motion_scores):.1f}-{max(motion_scores):.1f}, "
-          f"Edge: {min(edge_scores):.1f}-{max(edge_scores):.1f}, "
-          f"Background: {min(bg_scores):.1f}-{max(bg_scores):.1f}")
-    print(f"[DEBUG] ORB checked frame indices: {orb_checked_indices}")
+    from tqdm import tqdm
+    tqdm.write(f"⚠️ No enhanced stable frames detected in first {max_check_frames} frames")
     return 0, 0.0, {
         'focus_scores': focus_scores,
         'motion_scores': motion_scores,
@@ -597,50 +564,29 @@ def find_enhanced_stable_start_frame(
     }
 
 def find_focus_start_frame(video_path, fps, max_check_frames=300, focus_threshold=50, min_consecutive_focused=10):
-    """
-    Find the first frame where the camera is properly focused.
-    
-    Args:
-        video_path: Path to video file
-        fps: Frames per second
-        max_check_frames: Maximum frames to check for focus
-        focus_threshold: Focus detection threshold
-        min_consecutive_focused: Minimum consecutive focused frames required
-    
-    Returns:
-        tuple: (start_frame, start_time_seconds, focus_info)
-    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Failed to open video: {video_path}")
-    
     focused_count = 0
     focus_scores = []
     frame_times = []
-    
-    print(f"🔍 Checking first {max_check_frames} frames for focus quality...")
-    
+    # Remove all print/logs except final summary
     for frame_idx in range(max_check_frames):
         success, frame = cap.read()
         if not success:
             break
-            
         timestamp = frame_idx / fps
         is_focused, focus_score = detect_focus_quality(frame, focus_threshold)
-        
         focus_scores.append(focus_score)
         frame_times.append(timestamp)
-        
         if is_focused:
             focused_count += 1
             if focused_count >= min_consecutive_focused:
                 cap.release()
                 start_time = timestamp - (min_consecutive_focused / fps)
                 start_frame = max(0, frame_idx - min_consecutive_focused)
-                
-                print(f"✅ Focus detected at frame {start_frame} (time: {start_time:.2f}s)")
-                print(f"   Focus scores: min={min(focus_scores):.1f}, max={max(focus_scores):.1f}, avg={np.mean(focus_scores):.1f}")
-                
+                from tqdm import tqdm
+                tqdm.write(f"✅ Focus detected at frame {start_frame} (time: {start_time:.2f}s)")
                 return start_frame, start_time, {
                     'focus_scores': focus_scores,
                     'frame_times': frame_times,
@@ -648,9 +594,9 @@ def find_focus_start_frame(video_path, fps, max_check_frames=300, focus_threshol
                 }
         else:
             focused_count = 0
-    
     cap.release()
-    print(f"⚠️ No stable focus detected in first {max_check_frames} frames")
+    from tqdm import tqdm
+    tqdm.write(f"⚠️ No stable focus detected in first {max_check_frames} frames")
     return 0, 0.0, {'focus_scores': focus_scores, 'frame_times': frame_times, 'threshold': focus_threshold}
 
 def extract_frames(
@@ -671,26 +617,15 @@ def extract_frames(
 ):
     """
     Extract frames from video with enhanced focus and motion detection and flexible skipping options.
-    
-    Args:
-        video_path: Path to video file
-        output_folder: Output directory for frames
-        every_n_frames: Extract every Nth frame
-        skip_start_frames: Skip N frames from start
-        skip_start_seconds: Skip N seconds from start
-        auto_detect_focus: Automatically detect focus and skip unfocused frames
-        auto_detect_motion: Automatically detect motion and skip unstable frames
-        focus_threshold: Focus detection threshold
-        motion_threshold: Motion detection threshold
-        edge_threshold: Edge movement threshold
-        bg_threshold: Background movement threshold
-        min_consecutive_stable: Minimum consecutive stable frames required
-        progress_callback: Progress callback function
-        cancel_event: Cancellation event
     """
+    # tqdm bar for main progress
+    main_bar = None
     def notify_progress(p, msg):
+        nonlocal main_bar
         if progress_callback:
             progress_callback(p, msg)
+        elif main_bar is not None:
+            main_bar.set_postfix_str(msg)
         else:
             print(f"{int(p*100)}% - {msg}")
 
@@ -704,6 +639,7 @@ def extract_frames(
         raise ValueError("FPS is 0, cannot proceed.")
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    main_bar = tqdm(total=total_frames, desc="Extracting frames", unit="frame")
     notify_progress(0.0, f"Opened video: {video_path}, FPS: {fps}, Total frames: {total_frames}")
     
     # Calculate skip frames from seconds
@@ -718,7 +654,7 @@ def extract_frames(
     stability_info = None
     
     if auto_detect_focus and auto_detect_motion:
-        notify_progress(0.01, "🔍 Detecting camera focus and motion stability...")
+        notify_progress(0.01, "Detecting camera focus and motion stability...")
         stability_skip_frames, stability_skip_seconds, stability_info = find_enhanced_stable_start_frame(
             video_path, fps, focus_threshold=focus_threshold, 
             motion_threshold=motion_threshold, edge_threshold=edge_threshold,
@@ -726,7 +662,7 @@ def extract_frames(
             orb_frame_gap=5, orb_translation_threshold=0.2, orb_required_consecutive_stable=5
         )
     elif auto_detect_focus:
-        notify_progress(0.01, "🔍 Detecting camera focus...")
+        notify_progress(0.01, "Detecting camera focus...")
         stability_skip_frames, stability_skip_seconds, stability_info = find_focus_start_frame(
             video_path, fps, focus_threshold=focus_threshold, 
             min_consecutive_focused=min_consecutive_stable
@@ -754,7 +690,8 @@ def extract_frames(
     frame_index = 0
     saved_index = 0
     
-    with tqdm(total=total_frames, desc="Extracting frames") as pbar:
+    with tqdm(total=total_frames, desc="Extracting frames", unit="frame") as pbar:
+        main_bar = pbar
         while cap.isOpened():
             success, frame = cap.read()
             if not success:
@@ -771,7 +708,13 @@ def extract_frames(
                 filename = os.path.join(output_folder, f"frame_{saved_index:04d}_{timestamp:.2f}s.jpg")
                 cv2.imwrite(filename, frame)
                 saved_index += 1
-                
+                # Show per-frame status in tqdm
+                main_bar.set_postfix({
+                    "saved": saved_index,
+                    "frame": frame_index,
+                    "time": f"{timestamp:.2f}s"
+                })
+            
             if cancel_event and cancel_event.is_set():
                 notify_progress(1.0, "Processing cancelled by user.")
                 break
@@ -802,6 +745,7 @@ def extract_frames(
                 f.write(f"Average motion score: {np.mean(stability_info['motion_scores']):.1f}\n")
     
     notify_progress(0.05, f"Total frames saved: {saved_index}")
+    main_bar.close()
     return {
         'frames_saved': saved_index,
         'frames_skipped': final_skip_frames,

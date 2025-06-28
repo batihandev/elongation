@@ -19,7 +19,7 @@ def process_video(
     auto_detect_motion=True,
     focus_threshold=50,
     motion_threshold=200,
-    min_consecutive_stable=10
+    min_consecutive_stable=50
 ):
     """Process a video file directly like the backend does"""
     
