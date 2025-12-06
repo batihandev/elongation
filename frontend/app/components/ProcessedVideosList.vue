@@ -245,7 +245,7 @@ const fetchProcessedVideos = async () => {
   loading.value = true;
   error.value = null;
   try {
-    const res = await fetch("/backend/list_processed/");
+    const res = await fetch("/backend/list_processed");
     if (!res.ok) throw new Error("Failed to fetch processed videos");
     const json = await res.json();
     processedVideos.value = json.videos;

@@ -479,6 +479,115 @@
                   <span class="text-gray-400">Plot not available</span>
                 </div>
               </div>
+
+              <!-- Data + Downloads -->
+              <div
+                v-if="finalRows.length"
+                class="mt-6 bg-gray-900 rounded-lg border border-gray-700 p-4"
+              >
+                <div
+                  class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"
+                >
+                  <h4 class="text-md font-medium text-white">
+                    Elongation Data (1 sample / second, monotonic)
+                  </h4>
+                  <div class="flex flex-wrap gap-2">
+                    <!-- Save plot images -->
+                    <a
+                      v-if="plotUrl"
+                      :href="plotUrl"
+                      :download="`elongation_plot_${videoName}.png`"
+                      class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 border border-gray-500"
+                    >
+                      Save Plot (px)
+                    </a>
+                    <a
+                      v-if="newPlotUrl"
+                      :href="newPlotUrl"
+                      :download="`elongation_plot_mm_${videoName}.png`"
+                      class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 border border-gray-500"
+                    >
+                      Save Plot (mm)
+                    </a>
+
+                    <!-- CSV downloads -->
+                    <a
+                      v-if="finalCsvUrl"
+                      :href="finalCsvUrl"
+                      download
+                      class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Download Full CSV
+                    </a>
+                    <a
+                      v-if="simplifiedCsvUrl"
+                      :href="simplifiedCsvUrl"
+                      class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Download Simplified CSV
+                    </a>
+                    <a
+                      v-if="pixelToMmCsvUrl"
+                      :href="pixelToMmCsvUrl"
+                      download
+                      class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Download Pixel→mm CSV
+                    </a>
+                  </div>
+                </div>
+
+                <!-- Table -->
+                <div
+                  class="overflow-x-auto max-h-64 border border-gray-700 rounded-md"
+                >
+                  <table
+                    class="min-w-full text-xs sm:text-sm divide-y divide-gray-700"
+                  >
+                    <thead class="bg-gray-900">
+                      <tr>
+                        <th
+                          class="px-3 py-2 text-left font-medium text-gray-300"
+                        >
+                          Time (s)
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left font-medium text-gray-300"
+                        >
+                          Elongation %
+                        </th>
+                        <th
+                          v-if="hasMmData"
+                          class="px-3 py-2 text-left font-medium text-gray-300"
+                        >
+                          Elongation (mm)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-800 bg-gray-900/50">
+                      <tr v-for="(row, idx) in finalRows" :key="idx">
+                        <td class="px-3 py-1.5 text-gray-200">
+                          {{
+                            row.timestamp_s != null
+                              ? row.timestamp_s.toFixed(2)
+                              : idx
+                          }}
+                        </td>
+                        <td class="px-3 py-1.5 text-gray-200">
+                          {{ row.elongation_monotonic?.toFixed(2) }}%
+                        </td>
+                        <td v-if="hasMmData" class="px-3 py-1.5 text-gray-200">
+                          {{
+                            row.elongation_monotonic_mm != null
+                              ? row.elongation_monotonic_mm.toFixed(3)
+                              : "-"
+                          }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
 
             <!-- Pixel to MM Selector -->
@@ -487,7 +596,7 @@
               class="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6"
             >
               <PixelToMmSelector
-                :image-url="firstMarkedImageUrl + '?t=' + Date.now()"
+                :image-url="firstMarkedImageUrl + '&t=' + Date.now()"
                 :video-name="videoName"
                 @submit="handlePixelToMmSubmit"
               />
@@ -547,11 +656,6 @@ const plotImgError = ref(false);
 const mmPlotImgError = ref(false);
 const sidebarOpen = ref(false); // For mobile menu
 
-const safeVideoName = computed(() => {
-  const cleaned = videoName.value.replace(/ /g, "_");
-  return cleaned.replace(/\.(mp4|mov|avi|mkv)$/i, "");
-});
-
 const videoPlayerRef = ref(null);
 
 const openSidebar = () => {
@@ -570,25 +674,25 @@ const onDelete = (name) => {
   }
 };
 
-const loadFirstMarkedImage = (name, selected = false) => {
-  videoName.value = name;
-  const timestamp = Date.now();
+const loadFirstMarkedImage = (baseName, selected = false) => {
+  videoName.value = baseName;
 
-  firstMarkedImageUrl.value = `/backend/first_marked_image?video_name=${encodeURIComponent(
-    safeVideoName.value
-  )}&t=${timestamp}`;
+  firstMarkedImageUrl.value = `/backend/first_marked_image?base_name=${encodeURIComponent(
+    baseName
+  )}`;
 
   plotUrl.value = `/backend/results/elongation_plot_${encodeURIComponent(
-    safeVideoName.value
-  )}.png?t=${timestamp}`;
+    baseName
+  )}.png`;
 
   if (selected) {
     newPlotUrl.value = `/backend/results/elongation_plot_mm_${encodeURIComponent(
-      safeVideoName.value
-    )}.png?t=${timestamp}`;
+      baseName
+    )}.png`;
   } else {
     newPlotUrl.value = null;
   }
+  loadSimplifiedData(baseName);
 };
 
 const onVideoSelect = (name) => {
@@ -619,6 +723,56 @@ const handleDrop = (e) => {
     currentTime.value = 0;
   }
 };
+const finalRows = ref([]);
+const hasMmData = ref(false);
+
+const finalCsvUrl = computed(() =>
+  videoName.value
+    ? `/backend/results/elongation_final_${encodeURIComponent(
+        videoName.value
+      )}.csv`
+    : null
+);
+
+const pixelToMmCsvUrl = computed(() =>
+  videoName.value
+    ? `/backend/results/pixel_to_mm_${encodeURIComponent(videoName.value)}.csv`
+    : null
+);
+
+const simplifiedCsvUrl = computed(() =>
+  videoName.value
+    ? `/backend/final_data_simplified?base_name=${encodeURIComponent(
+        videoName.value
+      )}&as_csv=true`
+    : null
+);
+const loadSimplifiedData = async (baseName) => {
+  finalRows.value = [];
+  hasMmData.value = false;
+
+  try {
+    const res = await fetch(
+      `/backend/final_data_simplified?base_name=${encodeURIComponent(baseName)}`
+    );
+    if (!res.ok) return;
+
+    const json = await res.json();
+    hasMmData.value = !!json.has_mm;
+
+    finalRows.value = (json.rows || []).map((r) => ({
+      timestamp_s: r.timestamp_s != null ? Number(r.timestamp_s) : null,
+      elongation_monotonic:
+        r.elongation_monotonic != null ? Number(r.elongation_monotonic) : null,
+      elongation_monotonic_mm:
+        r.elongation_monotonic_mm != null
+          ? Number(r.elongation_monotonic_mm)
+          : null,
+    }));
+  } catch (err) {
+    console.error("Failed to load simplified data", err);
+  }
+};
 
 const updateCurrentFrame = () => {
   const videoPlayer = videoPlayerRef.value;
@@ -639,7 +793,7 @@ const startProcessing = async () => {
   formData.append("skip_end", skipEnd.value);
 
   try {
-    const res = await fetch("/backend/process/", {
+    const res = await fetch("/backend/process", {
       method: "POST",
       body: formData,
     });
@@ -647,9 +801,8 @@ const startProcessing = async () => {
 
     if (res.ok) {
       logs.value.push("✅ Processing finished.");
-      const timestamp = Date.now();
-      plotUrl.value = `/backend/${json.plot}?t=${timestamp}`;
-      loadFirstMarkedImage(video.value.name);
+      plotUrl.value = `/backend/${json.plot}`;
+      loadFirstMarkedImage(json.base_name);
     } else {
       logs.value.push("❌ Error: " + (json.error || "Unknown error"));
     }
@@ -673,7 +826,7 @@ const stopProcessing = async () => {
 
 const handlePixelToMmSubmit = async (data) => {
   try {
-    const res = await fetch("/backend/pixel_to_mm/", {
+    const res = await fetch("/backend/pixel_to_mm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -683,8 +836,7 @@ const handlePixelToMmSubmit = async (data) => {
     console.log("Pixel-to-mm result:", result);
 
     if (res.ok && result.plot) {
-      const timestamp = Date.now();
-      newPlotUrl.value = `/backend/${result.plot}?t=${timestamp}`;
+      newPlotUrl.value = `/backend/${result.plot}`;
       counter.value++;
     } else {
       console.error(

@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from elongation.subpixel import subpixel_refine
+from .subpixel import subpixel_refine
 from sklearn.cluster import DBSCAN
 
 def process_images(
@@ -248,7 +248,7 @@ def process_images(
             valid_patterns.append((pattern, name, y_grids[i]))
     if len(valid_patterns) < 2:
         notify_progress(1.0, "❌ Could not extract enough valid patterns. Exiting.")
-        return
+        raise RuntimeError("Could not extract enough valid patterns from first frame.")
 
     # Find reference positions from first frame
     x1 = max(center_x - pattern_width // 2, 0)
@@ -260,7 +260,7 @@ def process_images(
         ref_ys.append(ref_y)
     if any(y is None for y in ref_ys):
         notify_progress(1.0, "❌ Could not establish all reference positions. Exiting.")
-        return
+        raise RuntimeError("Could not establish reference positions for patterns.")
 
     # Calculate reference gauge lengths for all valid pairs (min_gap)
     ref_gauge_lengths = {}
@@ -430,7 +430,12 @@ def process_images(
         main_bar.update(1)
     if cancel_event and cancel_event.is_set():
         notify_progress(1.0, "Processing cancelled by user.")
-        return
+        raise RuntimeError("Processing cancelled by user.")
+
+    if not data:
+        notify_progress(1.0, "❌ No valid elongation measurements found.")
+        raise RuntimeError("No valid elongation data extracted from video.")
+
     pd.DataFrame(data).to_csv(csv_output_path, index=False)
     notify_progress(1.0, f"✔ All done! Marked frames in '{output_folder}', data in '{csv_output_path}'")
     main_bar.close()

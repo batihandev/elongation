@@ -15,7 +15,7 @@ export default defineNuxtConfig({
       proxy: {
         "/backend": {
           target: `http://127.0.0.1:8000/`,
-          changeOrigin: true,
+          changeOrigin: false,
           rewrite: (path: string) => path.replace(/^\/backend/, ""),
         },
       },

@@ -1,49 +1,63 @@
-.PHONY: install run clean mark elongation_data analyze draw_clamps perfect batch runserver testcurl sample1 sample2 sample1_heavy sample2_heavy sample2_sensitive
+.PHONY: install run clean mark elongation_data analyze draw_clamps perfect batch runserver testcurl sample1 sample2 cleanall
 
+# Install dependencies
 install:
-	pip install -r requirements.txt
+	python -m pip install -r requirements.txt
 
+# Run backend main
 run:
-	python backend/main.py
+	python -m elongation_rebar.backend.main
 
+# Clean generated data
 clean:
 	rm -rf results/output_frames_* results/elongation_marked_* results/*.csv results/*.png uploads/
 
+# Mark frames
 mark:
-	python elongation/mark_frames.py
+	python -m elongation_rebar.elongation.mark_frames
 
+# Clean elongation data
 elongation_data:
-	python elongation/clean_elongation_data.py
+	python -m elongation_rebar.elongation.clean_elongation_data
 
+# Analyze elongation data
 analyze:
-	python elongation/analyze_elongation.py
+	python -m elongation_rebar.elongation.analyze_elongation
 
+# Draw clamps
 draw_clamps:
-	python elongation/draw_clamps.py
+	python -m elongation_rebar.elongation.draw_clamps
 
+# Almost-perfect mode
 perfect:
-	python elongation/almost_perfect.py
+	python -m elongation_rebar.elongation.almost_perfect
 
+# Batch runner
 batch:
-	python elongation/batch_runner.py
+	python -m elongation_rebar.elongation.batch_runner
 
+# Run FastAPI server
 runserver:
-	uvicorn backend.main:app --reload
+	uvicorn elongation_rebar.backend.main:app --reload
 
+# Test curl upload
 testcurl:
 	curl -X POST http://localhost:8000/process/ \
-	-F "video=@sample/40kn-2.mp4" \
-	-F "every_n_frames=5" \
-	-F "min_elong=100" \
-	-F "max_elong=140"
+		-F "video=@sample/40kn-2.mp4" \
+		-F "every_n_frames=5" \
+		-F "min_elong=100" \
+		-F "max_elong=140"
 
-# Simple commands to process sample videos
+# Sample video processors
 sample1:
 	python process_video.py 1
 
 sample2:
 	python process_video.py 2
 
-# Delete entire results folder
+# Wipe everything
 cleanall:
 	rm -rf results/
+
+activate:
+	source .venv/bin/activate
