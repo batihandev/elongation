@@ -437,6 +437,7 @@
             <!-- Results Section -->
             <div
               v-if="plotUrl || newPlotUrl"
+              :key="counter"
               ref="resultsSection"
               :class="[
                 'bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6 transition duration-300',
