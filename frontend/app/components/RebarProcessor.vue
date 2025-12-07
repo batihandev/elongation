@@ -322,7 +322,7 @@
                   />
                   <div class="mt-3 text-sm text-gray-400">
                     <div class="flex justify-between">
-                      <span>Current time: {{ currentTime.toFixed(2) }}s</span>
+                      <span>Current time: {{ currentTime?.toFixed(2) }}s</span>
                       <span>Frame: {{ currentFrame }}</span>
                     </div>
                   </div>
@@ -447,6 +447,82 @@
             >
               <h3 class="text-lg font-semibold text-white mb-4">Results</h3>
 
+              <!-- "Processing complete" banner -->
+              <div
+                v-if="resultsJustUpdated"
+                class="mb-4 flex items-center justify-between rounded-md bg-blue-900 border border-blue-700 px-4 py-3 text-sm text-blue-100"
+              >
+                <div class="flex items-center space-x-2">
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"
+                    />
+                  </svg>
+                  <span
+                    >Processing complete. Scroll through this section to review
+                    the results.</span
+                  >
+                </div>
+                <button
+                  class="ml-4 text-blue-200 hover:text-white"
+                  @click="resultsJustUpdated = false"
+                >
+                  ×
+                </button>
+              </div>
+
+              <!-- Summary stats -->
+              <div
+                v-if="hasSummaryStats"
+                class="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-4"
+              >
+                <div
+                  class="bg-gray-900/70 border border-gray-700 rounded-lg p-3"
+                >
+                  <p class="text-xs uppercase tracking-wide text-gray-400">
+                    Max Elongation
+                  </p>
+                  <p class="mt-1 text-lg font-semibold text-white">
+                    {{ stats.maxPercent?.toFixed(2) }}%
+                  </p>
+                </div>
+
+                <div
+                  v-if="hasMmData && stats.maxMm != null"
+                  class="bg-gray-900/70 border border-gray-700 rounded-lg p-3"
+                >
+                  <p class="text-xs uppercase tracking-wide text-gray-400">
+                    Max Elongation (mm)
+                  </p>
+                  <p class="mt-1 text-lg font-semibold text-white">
+                    {{ stats.maxMm?.toFixed(3) }} mm
+                  </p>
+                </div>
+
+                <div
+                  v-if="
+                    stats.yieldTime != null && stats.yieldElongation != null
+                  "
+                  class="bg-gray-900/70 border border-gray-700 rounded-lg p-3"
+                >
+                  <p class="text-xs uppercase tracking-wide text-gray-400">
+                    Estimated Yield Point
+                  </p>
+                  <p class="mt-1 text-sm font-semibold text-white">
+                    {{ stats.yieldElongation?.toFixed(2) }}% &nbsp; @
+                    {{ stats.yieldTime?.toFixed(2) }} s
+                  </p>
+                </div>
+              </div>
+
               <!-- Original Plot -->
               <div v-if="plotUrl" class="mb-6">
                 <h4 class="text-md font-medium text-white mb-3">
@@ -479,6 +555,31 @@
                   </svg>
                   <span class="text-gray-400">Plot not available</span>
                 </div>
+
+                <!-- Final Monotonic info -->
+                <p
+                  class="mt-2 text-xs text-gray-400 flex items-start space-x-2 max-w-xl"
+                >
+                  <svg
+                    class="w-4 h-4 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"
+                    />
+                  </svg>
+                  <span>
+                    The <span class="font-semibold">“Final Monotonic”</span>
+                    curve in the legend is a smoothed, non-decreasing fit of the
+                    raw elongation data. It removes small backwards steps in the
+                    signal while preserving the overall trend.
+                  </span>
+                </p>
               </div>
 
               <!-- MM Plot -->
@@ -561,14 +662,24 @@
                     >
                       Download Simplified CSV
                     </a>
+
+                    <!-- Pixel→mm CSV: greyed out until calibrated -->
                     <a
-                      v-if="pixelToMmCsvUrl"
+                      v-if="hasMmData && pixelToMmCsvUrl"
                       :href="pixelToMmCsvUrl"
                       download
                       class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white"
                     >
                       Download Pixel→mm CSV
                     </a>
+                    <button
+                      v-else
+                      type="button"
+                      class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-gray-700 text-gray-400 border border-gray-600 cursor-not-allowed"
+                      title="Calibrate pixel→mm to enable this CSV"
+                    >
+                      Pixel→mm CSV (calibrate first)
+                    </button>
                   </div>
                 </div>
 
@@ -604,7 +715,7 @@
                         <td class="px-3 py-1.5 text-gray-200">
                           {{
                             row.timestamp_s != null
-                              ? row.timestamp_s.toFixed(2)
+                              ? row.timestamp_s?.toFixed(2)
                               : idx
                           }}
                         </td>
@@ -614,7 +725,7 @@
                         <td v-if="hasMmData" class="px-3 py-1.5 text-gray-200">
                           {{
                             row.elongation_monotonic_mm != null
-                              ? row.elongation_monotonic_mm.toFixed(3)
+                              ? row.elongation_monotonic_mm?.toFixed(3)
                               : "-"
                           }}
                         </td>
@@ -672,6 +783,8 @@
 
 <script setup>
 import { ref, onMounted, computed, nextTick } from "vue";
+import PixelToMmSelector from "./PixelToMmSelector.vue";
+import ProcessedVideosList from "./ProcessedVideosList.vue";
 
 const videoName = ref("");
 const firstMarkedImageUrl = ref(null);
@@ -699,6 +812,24 @@ const logsContainerRef = ref(null);
 const toastVisible = ref(false);
 const toastMessage = ref("");
 let toastTimeoutId = null;
+
+// summary stats
+const stats = ref({
+  maxPercent: null,
+  maxMm: null,
+  yieldTime: null,
+  yieldElongation: null,
+});
+
+const resultsJustUpdated = ref(false);
+
+const hasSummaryStats = computed(() => {
+  return (
+    stats.value.maxPercent != null ||
+    (stats.value.maxMm != null && hasMmData.value) ||
+    (stats.value.yieldTime != null && stats.value.yieldElongation != null)
+  );
+});
 
 const showToast = (message, duration = 3000) => {
   toastMessage.value = message;
@@ -745,6 +876,14 @@ const onDelete = (name) => {
     videoName.value = "";
     plotUrl.value = null;
     newPlotUrl.value = null;
+    finalRows.value = [];
+    hasMmData.value = false;
+    stats.value = {
+      maxPercent: null,
+      maxMm: null,
+      yieldTime: null,
+      yieldElongation: null,
+    };
   }
 };
 
@@ -770,6 +909,9 @@ const loadFirstMarkedImage = (baseName, selected = false) => {
 };
 
 const onVideoSelect = (name) => {
+  // when selecting an existing run we don't know yield, so clear yield-only stats
+  stats.value.yieldTime = null;
+  stats.value.yieldElongation = null;
   loadFirstMarkedImage(name, true);
   viewMode.value = "upload";
 };
@@ -823,6 +965,30 @@ const simplifiedCsvUrl = computed(() =>
     : null
 );
 
+const recomputeStatsFromRows = () => {
+  if (!finalRows.value.length) {
+    stats.value.maxPercent = null;
+    stats.value.maxMm = null;
+    return;
+  }
+
+  const percents = finalRows.value
+    .map((r) => r.elongation_monotonic)
+    .filter((v) => typeof v === "number" && Number.isFinite(v));
+  stats.value.maxPercent = percents.length
+    ? Math.max(...percents)
+    : stats.value.maxPercent;
+
+  if (hasMmData.value) {
+    const mms = finalRows.value
+      .map((r) => r.elongation_monotonic_mm)
+      .filter((v) => typeof v === "number" && Number.isFinite(v));
+    stats.value.maxMm = mms.length ? Math.max(...mms) : stats.value.maxMm;
+  } else {
+    stats.value.maxMm = null;
+  }
+};
+
 const loadSimplifiedData = async (baseName) => {
   finalRows.value = [];
   hasMmData.value = false;
@@ -845,6 +1011,8 @@ const loadSimplifiedData = async (baseName) => {
           ? Number(r.elongation_monotonic_mm)
           : null,
     }));
+
+    recomputeStatsFromRows();
   } catch (err) {
     console.error("Failed to load simplified data", err);
   }
@@ -865,6 +1033,14 @@ const startProcessing = async () => {
   firstMarkedImageUrl.value = null;
   plotImgError.value = false;
   mmPlotImgError.value = false;
+  finalRows.value = [];
+  hasMmData.value = false;
+  stats.value = {
+    maxPercent: null,
+    maxMm: null,
+    yieldTime: null,
+    yieldElongation: null,
+  };
 
   const formData = new FormData();
   formData.append("video", video.value);
@@ -879,10 +1055,20 @@ const startProcessing = async () => {
     const json = await res.json();
 
     if (res.ok) {
+      // store yield summary from backend if available
+      if (json.yield_time_s != null && json.yield_elongation_percent != null) {
+        stats.value.yieldTime = Number(json.yield_time_s);
+        stats.value.yieldElongation = Number(json.yield_elongation_percent);
+      }
+
       pushLog("✅ Processing finished.");
       plotUrl.value = `/backend/${json.plot}`;
       loadFirstMarkedImage(json.base_name);
       showToast("Processing finished. Results are ready.");
+      resultsJustUpdated.value = true;
+      setTimeout(() => {
+        resultsJustUpdated.value = false;
+      }, 6000);
       await highlightResultsAndScroll();
     } else {
       pushLog("❌ Error: " + (json.error || "Unknown error"));
@@ -924,6 +1110,10 @@ const handlePixelToMmSubmit = async (data) => {
       newPlotUrl.value = `/backend/${result.plot}`;
       mmPlotImgError.value = false;
       showToast("Pixel → mm conversion complete.");
+      // After calibration, mm data exists; refresh simplified data + stats
+      if (videoName.value) {
+        await loadSimplifiedData(videoName.value);
+      }
       await highlightResultsAndScroll();
     } else {
       console.error(
@@ -941,8 +1131,9 @@ const handlePixelToMmSubmit = async (data) => {
 onMounted(() => {
   if (import.meta.client) {
     const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = `${wsScheme}://${window.location.host}/backend/ws`;
-
+    const wsUrl = window.location.host.includes("localhost")
+      ? `ws://localhost:8000/ws`
+      : `${wsScheme}://${window.location.host}/backend/ws`;
     const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (e) => pushLog(e.data);
