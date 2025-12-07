@@ -1,7 +1,3 @@
-Here’s the full updated SFC with: * Smooth scroll to **Results** when: *
-processing finishes * pixel→mm conversion finishes * A small highlight glow
-around the results card * A simple toast notification * Auto-scrolling logs to
-bottom ```vue
 <template>
   <div class="min-h-screen bg-gray-900">
     <!-- Toast -->
@@ -944,8 +940,15 @@ const handlePixelToMmSubmit = async (data) => {
 };
 
 onMounted(() => {
-  const ws = new WebSocket("ws://localhost:8000/ws");
-  ws.onmessage = (e) => pushLog(e.data);
+  if (import.meta.client) {
+    const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = `${wsScheme}://${window.location.host}/backend/ws`;
+
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (e) => pushLog(e.data);
+    ws.onopen = () => console.log("WS connected:", wsUrl);
+    ws.onclose = () => console.log("WS closed");
+  }
 });
 </script>
-```
