@@ -403,8 +403,7 @@ async def list_processed_videos():
 async def delete_processed_video(video_name: str):
     try:
         # accept either original name or base_name
-        base_name = normalize_video_name(os.path.splitext(video_name)[0])
-        cleanup_results_for_base(base_name)
+        cleanup_results_for_base(video_name)
         return {"status": "deleted", "video_name": video_name}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
