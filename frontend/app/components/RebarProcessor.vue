@@ -1,5 +1,38 @@
+Here’s the full updated SFC with: * Smooth scroll to **Results** when: *
+processing finishes * pixel→mm conversion finishes * A small highlight glow
+around the results card * A simple toast notification * Auto-scrolling logs to
+bottom ```vue
 <template>
   <div class="min-h-screen bg-gray-900">
+    <!-- Toast -->
+    <transition name="fade">
+      <div
+        v-if="toastVisible"
+        class="fixed bottom-4 right-4 z-50 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 shadow-lg flex items-center space-x-3"
+      >
+        <svg
+          class="w-5 h-5 text-green-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        <span class="text-sm text-gray-100">{{ toastMessage }}</span>
+        <button
+          class="ml-2 text-gray-400 hover:text-gray-200"
+          @click="toastVisible = false"
+        >
+          ×
+        </button>
+      </div>
+    </transition>
+
     <!-- Header -->
     <header class="bg-gray-800 shadow-lg border-b border-gray-700">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -409,7 +442,12 @@
             <div
               v-if="plotUrl || newPlotUrl"
               ref="resultsSection"
-              class="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6"
+              :class="[
+                'bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6 transition duration-300',
+                resultsHighlight
+                  ? 'ring-2 ring-blue-400 shadow-blue-500/30'
+                  : '',
+              ]"
             >
               <h3 class="text-lg font-semibold text-white mb-4">Results</h3>
 
@@ -474,7 +512,7 @@
                       stroke-linecap="round"
                       stroke-linejoin="round"
                       stroke-width="2"
-                      d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12A9 9 0 113 12a9 9 0 0118 0z"
+                      d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12A9 9 0 113 3a9 9 0 0118 0z"
                     />
                   </svg>
                   <span class="text-gray-400">Plot not available</span>
@@ -618,6 +656,7 @@
               Processing Logs
             </h3>
             <div
+              ref="logsContainerRef"
               class="bg-gray-900 rounded-md p-4 max-h-64 overflow-y-auto border border-gray-700"
             >
               <div
@@ -659,6 +698,45 @@ const sidebarOpen = ref(false); // For mobile menu
 
 const videoPlayerRef = ref(null);
 const resultsSection = ref(null);
+const resultsHighlight = ref(false);
+const logsContainerRef = ref(null);
+
+const toastVisible = ref(false);
+const toastMessage = ref("");
+let toastTimeoutId = null;
+
+const showToast = (message, duration = 3000) => {
+  toastMessage.value = message;
+  toastVisible.value = true;
+  if (toastTimeoutId) clearTimeout(toastTimeoutId);
+  toastTimeoutId = setTimeout(() => {
+    toastVisible.value = false;
+  }, duration);
+};
+
+const highlightResultsAndScroll = async () => {
+  await nextTick();
+  if (resultsSection.value) {
+    resultsSection.value.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+    resultsHighlight.value = true;
+    setTimeout(() => {
+      resultsHighlight.value = false;
+    }, 1500);
+  }
+};
+
+const pushLog = (msg) => {
+  logs.value.push(msg);
+  nextTick(() => {
+    if (logsContainerRef.value) {
+      logsContainerRef.value.scrollTop = logsContainerRef.value.scrollHeight;
+    }
+  });
+};
+
 const openSidebar = () => {
   sidebarOpen.value = true;
 };
@@ -724,6 +802,7 @@ const handleDrop = (e) => {
     currentTime.value = 0;
   }
 };
+
 const finalRows = ref([]);
 const hasMmData = ref(false);
 
@@ -748,6 +827,7 @@ const simplifiedCsvUrl = computed(() =>
       )}&as_csv=true`
     : null
 );
+
 const loadSimplifiedData = async (baseName) => {
   finalRows.value = [];
   hasMmData.value = false;
@@ -785,8 +865,11 @@ const updateCurrentFrame = () => {
 const startProcessing = async () => {
   logs.value = [];
   plotUrl.value = null;
+  newPlotUrl.value = null;
   processing.value = true;
   firstMarkedImageUrl.value = null;
+  plotImgError.value = false;
+  mmPlotImgError.value = false;
 
   const formData = new FormData();
   formData.append("video", video.value);
@@ -801,14 +884,18 @@ const startProcessing = async () => {
     const json = await res.json();
 
     if (res.ok) {
-      logs.value.push("✅ Processing finished.");
+      pushLog("✅ Processing finished.");
       plotUrl.value = `/backend/${json.plot}`;
       loadFirstMarkedImage(json.base_name);
+      showToast("Processing finished. Results are ready.");
+      await highlightResultsAndScroll();
     } else {
-      logs.value.push("❌ Error: " + (json.error || "Unknown error"));
+      pushLog("❌ Error: " + (json.error || "Unknown error"));
+      showToast("Processing failed.", 4000);
     }
   } catch (err) {
-    logs.value.push("❌ Error: " + err.message);
+    pushLog("❌ Error: " + err.message);
+    showToast("Processing error.", 4000);
   } finally {
     processing.value = false;
   }
@@ -819,9 +906,11 @@ const stopProcessing = async () => {
     await fetch("/backend/stop/", {
       method: "POST",
     });
-    logs.value.push("🛑 Stop requested.");
+    pushLog("🛑 Stop requested.");
+    showToast("Stop requested.");
   } catch (err) {
-    logs.value.push("❌ Stop error: " + err.message);
+    pushLog("❌ Stop error: " + err.message);
+    showToast("Error while requesting stop.", 4000);
   }
 };
 
@@ -839,26 +928,24 @@ const handlePixelToMmSubmit = async (data) => {
     if (res.ok && result.plot) {
       newPlotUrl.value = `/backend/${result.plot}`;
       counter.value++;
-      await nextTick();
-      if (resultsSection.value) {
-        resultsSection.value.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }
+      showToast("Pixel → mm conversion complete.");
+      await highlightResultsAndScroll();
     } else {
       console.error(
         "Failed to generate pixel to mm plot:",
         result.error || "Unknown error"
       );
+      showToast("Pixel → mm conversion failed.", 4000);
     }
   } catch (err) {
     console.error("Error calling pixel_to_mm API:", err);
+    showToast("Pixel → mm API error.", 4000);
   }
 };
 
 onMounted(() => {
   const ws = new WebSocket("ws://localhost:8000/ws");
-  ws.onmessage = (e) => logs.value.push(e.data);
+  ws.onmessage = (e) => pushLog(e.data);
 });
 </script>
+```
