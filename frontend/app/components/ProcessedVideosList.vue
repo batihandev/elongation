@@ -266,7 +266,7 @@ const deleteVideo = async () => {
 
   try {
     const res = await fetch(
-      `/backend/delete_processed/?video_name=${encodeURIComponent(
+      `/backend/delete_processed?video_name=${encodeURIComponent(
         videoToDelete.value
       )}`,
       {
