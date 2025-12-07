@@ -437,7 +437,6 @@
             <!-- Results Section -->
             <div
               v-if="plotUrl || newPlotUrl"
-              :key="counter"
               ref="resultsSection"
               :class="[
                 'bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6 transition duration-300',
@@ -683,7 +682,6 @@ const skipEnd = ref(0);
 const videoUrl = ref(null);
 const currentTime = ref(0);
 const currentFrame = ref(0);
-const counter = ref(0);
 const FPS = ref(30);
 const logs = ref([]);
 const newPlotUrl = ref(null);
@@ -923,8 +921,8 @@ const handlePixelToMmSubmit = async (data) => {
     console.log("Pixel-to-mm result:", result);
 
     if (res.ok && result.plot) {
-      newPlotUrl.value = `/backend/${result.plot}?t=` + Date.now();
-      counter.value++;
+      newPlotUrl.value = `/backend/${result.plot}`;
+      mmPlotImgError.value = false;
       showToast("Pixel → mm conversion complete.");
       await highlightResultsAndScroll();
     } else {
