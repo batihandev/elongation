@@ -44,7 +44,7 @@ processing_cancelled = threading.Event()
 RESULTS_DIR = "results"
 
 # Simple IP-based rate limit: 2 videos / 24h
-RATE_LIMIT_MAX = 2
+RATE_LIMIT_MAX = 100
 RATE_LIMIT_WINDOW = timedelta(hours=24)
 _rate_limit_state: Dict[str, Dict] = {}
 

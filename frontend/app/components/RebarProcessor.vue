@@ -408,6 +408,7 @@
             <!-- Results Section -->
             <div
               v-if="plotUrl || newPlotUrl"
+              ref="resultsSection"
               class="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6"
             >
               <h3 class="text-lg font-semibold text-white mb-4">Results</h3>
@@ -635,7 +636,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, nextTick } from "vue";
 
 const videoName = ref("");
 const firstMarkedImageUrl = ref(null);
@@ -657,7 +658,7 @@ const mmPlotImgError = ref(false);
 const sidebarOpen = ref(false); // For mobile menu
 
 const videoPlayerRef = ref(null);
-
+const resultsSection = ref(null);
 const openSidebar = () => {
   sidebarOpen.value = true;
 };
@@ -838,6 +839,13 @@ const handlePixelToMmSubmit = async (data) => {
     if (res.ok && result.plot) {
       newPlotUrl.value = `/backend/${result.plot}`;
       counter.value++;
+      await nextTick();
+      if (resultsSection.value) {
+        resultsSection.value.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
     } else {
       console.error(
         "Failed to generate pixel to mm plot:",

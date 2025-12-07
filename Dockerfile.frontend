@@ -1,0 +1,23 @@
+# Dockerfile.frontend
+FROM node:22-alpine
+
+# Enable pnpm (Nuxt 3 uses it by default in your package.json)
+RUN corepack enable
+
+WORKDIR /app
+
+# Install deps
+COPY frontend/package.json frontend/pnpm-lock.yaml ./frontend/
+WORKDIR /app/frontend
+RUN pnpm install --frozen-lockfile
+
+# Copy rest of frontend
+COPY frontend/ .
+
+# Build Nuxt app
+RUN pnpm build
+
+EXPOSE 3000
+
+# Use preview server (static-ish) instead of dev server
+CMD ["pnpm", "preview", "--host", "0.0.0.0", "--port", "3000"]

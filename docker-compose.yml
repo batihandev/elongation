@@ -1,0 +1,22 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: elongation-backend
+    ports:
+      - "127.0.0.1:8052:8000" # only accessible from host
+    volumes:
+      - ./results:/app/results
+      - ./uploads:/app/uploads
+      - ./sample:/app/sample:ro
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: elongation-frontend
+    ports:
+      - "127.0.0.1:8053:3000" # Nuxt preview on host:8053
+    environment:
+      NUXT_PUBLIC_API_BASE: "http://127.0.0.1:8052"

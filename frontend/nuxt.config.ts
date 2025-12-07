@@ -9,12 +9,16 @@ export default defineNuxtConfig({
   future: {
     compatibilityVersion: 4,
   },
-
+  runtimeConfig: {
+    public: {
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
+    },
+  },
   vite: {
     server: {
       proxy: {
         "/backend": {
-          target: `http://127.0.0.1:8000/`,
+          target: process.env.NUXT_PUBLIC_API_BASE || "http://127.0.0.1:8000/",
           changeOrigin: false,
           rewrite: (path: string) => path.replace(/^\/backend/, ""),
         },
