@@ -922,7 +922,7 @@ const handlePixelToMmSubmit = async (data) => {
     console.log("Pixel-to-mm result:", result);
 
     if (res.ok && result.plot) {
-      newPlotUrl.value = `/backend/${result.plot}`;
+      newPlotUrl.value = `/backend/${result.plot}?t=` + Date.now();
       counter.value++;
       showToast("Pixel → mm conversion complete.");
       await highlightResultsAndScroll();
